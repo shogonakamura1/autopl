@@ -16,6 +16,7 @@
       "bundleIdentifier": "com.shogonakamura.autopl",
       "minimumOsVersion": "16.0"
     },
+    "scheme": "autopl",
     "web": {
       "favicon": "./assets/favicon.png"
     }

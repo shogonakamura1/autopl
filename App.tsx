@@ -8,9 +8,11 @@ import { StatusBar } from 'expo-status-bar'
 import { AutoplLightTheme, AutoplDarkTheme } from './src/theme'
 import { RootNavigator } from './src/navigation/RootNavigator'
 import { useAppRestore } from './src/hooks/useAppRestore'
+import { useShareHandler } from './src/hooks/useShareHandler'
 
 function AppContent() {
   useAppRestore()
+  useShareHandler()
   return <RootNavigator />
 }
 
