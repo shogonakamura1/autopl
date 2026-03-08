@@ -5,12 +5,14 @@ interface VoiceState {
   recognitionState: VoiceRecognitionState
   isOnline: boolean
   lastRecognizedText: string | null
+  hasMicPermission: boolean
 }
 
 interface VoiceActions {
   setRecognitionState: (state: VoiceRecognitionState) => void
   setIsOnline: (isOnline: boolean) => void
   setLastRecognizedText: (text: string | null) => void
+  setHasMicPermission: (hasPermission: boolean) => void
   resetVoice: () => void
 }
 
@@ -20,6 +22,7 @@ const INITIAL_VOICE_STATE: VoiceState = {
   recognitionState: VoiceRecognitionState.IDLE,
   isOnline: true,
   lastRecognizedText: null,
+  hasMicPermission: true,
 }
 
 export const useVoiceStore = create<VoiceStore>()((set) => ({
@@ -35,6 +38,10 @@ export const useVoiceStore = create<VoiceStore>()((set) => ({
 
   setLastRecognizedText: (text: string | null) => {
     set({ lastRecognizedText: text })
+  },
+
+  setHasMicPermission: (hasPermission: boolean) => {
+    set({ hasMicPermission: hasPermission })
   },
 
   resetVoice: () => {

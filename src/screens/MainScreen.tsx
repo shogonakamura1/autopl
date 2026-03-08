@@ -9,6 +9,7 @@ import { SegmentedProgressBar } from '../components/player/SegmentedProgressBar'
 import { PlayerControls } from '../components/player/PlayerControls'
 import { PlaybackRateSelector } from '../components/player/PlaybackRateSelector'
 import { ListeningIndicator } from '../components/player/ListeningIndicator'
+import { StatusBanners } from '../components/common/StatusBanners'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import { useVoiceStore } from '../stores/voiceStore'
 import { PlaybackRate, VoiceRecognitionState } from '../types'
@@ -115,6 +116,8 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
           accessibilityLabel="設定"
         />
       </Appbar.Header>
+
+      <StatusBanners />
 
       {selectedFile ? (
         <SegmentedProgressBar
