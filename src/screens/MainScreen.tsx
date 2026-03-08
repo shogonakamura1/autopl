@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { View, StyleSheet } from 'react-native'
-import { Appbar, Text, useTheme } from 'react-native-paper'
+import { Appbar, Snackbar, Text, useTheme } from 'react-native-paper'
 import { DrawerNavigationProp } from '@react-navigation/drawer'
 import { useNavigation } from '@react-navigation/native'
 import { NativeStackNavigationProp } from '@react-navigation/native-stack'
@@ -8,8 +8,10 @@ import { DrawerParamList, RootStackParamList } from '../navigation/types'
 import { SegmentedProgressBar } from '../components/player/SegmentedProgressBar'
 import { PlayerControls } from '../components/player/PlayerControls'
 import { PlaybackRateSelector } from '../components/player/PlaybackRateSelector'
+import { ListeningIndicator } from '../components/player/ListeningIndicator'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
-import { PlaybackRate } from '../types'
+import { useVoiceStore } from '../stores/voiceStore'
+import { PlaybackRate, VoiceRecognitionState } from '../types'
 
 type Props = {
   navigation: DrawerNavigationProp<DrawerParamList, 'Main'>
@@ -22,6 +24,35 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
   const stackNavigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const [isRateSelectorVisible, setIsRateSelectorVisible] = useState(false)
+  const [isFailureSnackbarVisible, setIsFailureSnackbarVisible] =
+    useState(false)
+
+  const recognitionState = useVoiceStore((state) => state.recognitionState)
+  const previousRecognitionStateRef = React.useRef(recognitionState)
+
+  const isListeningModalVisible =
+    recognitionState === VoiceRecognitionState.LISTENING_FOR_COMMAND ||
+    recognitionState === VoiceRecognitionState.PROCESSING
+
+  useEffect(() => {
+    const previousState = previousRecognitionStateRef.current
+    previousRecognitionStateRef.current = recognitionState
+
+    const wasListeningOrProcessing =
+      previousState === VoiceRecognitionState.LISTENING_FOR_COMMAND ||
+      previousState === VoiceRecognitionState.PROCESSING
+
+    const isNowIdle =
+      recognitionState === VoiceRecognitionState.IDLE ||
+      recognitionState === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
+
+    if (wasListeningOrProcessing && isNowIdle) {
+      const lastText = useVoiceStore.getState().lastRecognizedText
+      if (lastText === null) {
+        setIsFailureSnackbarVisible(true)
+      }
+    }
+  }, [recognitionState])
 
   const {
     isPlaying,
@@ -126,6 +157,23 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
         onSelect={handleRateSelect}
         onDismiss={() => setIsRateSelectorVisible(false)}
       />
+
+      <ListeningIndicator visible={isListeningModalVisible} />
+
+      <Snackbar
+        visible={isFailureSnackbarVisible}
+        onDismiss={() => setIsFailureSnackbarVisible(false)}
+        duration={3000}
+        style={{ backgroundColor: colors.errorContainer }}
+        action={{
+          label: '閉じる',
+          onPress: () => setIsFailureSnackbarVisible(false),
+        }}
+      >
+        <Text style={{ color: colors.onErrorContainer }}>
+          認識できませんでした
+        </Text>
+      </Snackbar>
     </View>
   )
 }
