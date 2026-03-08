@@ -7,6 +7,12 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
 import { AutoplLightTheme, AutoplDarkTheme } from './src/theme'
 import { RootNavigator } from './src/navigation/RootNavigator'
+import { useAppRestore } from './src/hooks/useAppRestore'
+
+function AppContent() {
+  useAppRestore()
+  return <RootNavigator />
+}
 
 export default function App() {
   const colorScheme = useColorScheme()
@@ -19,7 +25,7 @@ export default function App() {
         <PaperProvider theme={theme}>
           <NavigationContainer>
             <StatusBar style={isDark ? 'light' : 'dark'} />
-            <RootNavigator />
+            <AppContent />
           </NavigationContainer>
         </PaperProvider>
       </SafeAreaProvider>
