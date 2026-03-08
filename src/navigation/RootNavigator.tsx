@@ -5,7 +5,9 @@ import { useTheme } from 'react-native-paper'
 import { RootStackParamList, DrawerParamList } from './types'
 import { MainScreen } from '../screens/MainScreen'
 import { SettingsScreen } from '../screens/SettingsScreen'
+import { OnboardingScreen } from '../screens/OnboardingScreen'
 import { DrawerContent } from '../components/drawer/DrawerContent'
+import { useSettingsStore } from '../stores/settingsStore'
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
 const Drawer = createDrawerNavigator<DrawerParamList>()
@@ -36,11 +38,16 @@ const DrawerNavigator: React.FC = () => {
 
 /**
  * ルートナビゲーター
- * DrawerNavigator（メイン） + Settings（スタック）
+ * Onboarding（初回のみ） + DrawerNavigator（メイン） + Settings（スタック）
  */
 export const RootNavigator: React.FC = () => {
+  const onboardingDone = useSettingsStore((state) => state.onboardingDone)
+
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {!onboardingDone && (
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+      )}
       <Stack.Screen name="Drawer" component={DrawerNavigator} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
     </Stack.Navigator>
