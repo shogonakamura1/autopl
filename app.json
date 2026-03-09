@@ -27,7 +27,8 @@
           "microphonePermission": "音声コマンドでの操作に使用します。",
           "speechRecognitionPermission": "音声コマンドを認識するために使用します。"
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "scheme": "autopl",
     "web": {
