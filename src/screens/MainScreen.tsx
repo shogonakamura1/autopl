@@ -11,6 +11,7 @@ import { PlaybackRateSelector } from '../components/player/PlaybackRateSelector'
 import { ListeningIndicator } from '../components/player/ListeningIndicator'
 import { StatusBanners } from '../components/common/StatusBanners'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
+import { useVoiceCommandHandler } from '../hooks/useVoiceCommandHandler'
 import { useVoiceStore } from '../stores/voiceStore'
 import { PlaybackRate, VoiceRecognitionState } from '../types'
 
@@ -54,6 +55,9 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
       }
     }
   }, [recognitionState])
+
+  // 音声コマンド統合
+  useVoiceCommandHandler()
 
   const {
     isPlaying,
