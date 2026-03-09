@@ -31,10 +31,14 @@ export const soundService = {
    */
   async preload(): Promise<void> {
     try {
+      // allowsRecording: true にすることで TrackPlayer の PlayAndRecord
+      // カテゴリ設定と競合しないようにする。
+      // （false のままだと expo-audio が Playback カテゴリに戻してしまい
+      //   音声認識時に Bluetooth プロファイルが切り替わる原因になる）
       await setAudioModeAsync({
         playsInSilentMode: true,
         interruptionMode: 'mixWithOthers',
-        allowsRecording: false,
+        allowsRecording: true,
         shouldPlayInBackground: false,
         shouldRouteThroughEarpiece: false,
       })
