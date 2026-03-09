@@ -1,6 +1,9 @@
 import TrackPlayer, {
   Capability,
   AppKilledPlaybackBehavior,
+  IOSCategory,
+  IOSCategoryMode,
+  IOSCategoryOptions,
 } from 'react-native-track-player'
 
 let isPlayerSetup = false
@@ -17,7 +20,19 @@ export const audioService = {
     if (isPlayerSetup) return
 
     try {
-      await TrackPlayer.setupPlayer()
+      // PlayAndRecord + AllowBluetoothA2DP のみ指定することで、
+      // Bluetooth デバイスは A2DP（高音質）のまま維持し、
+      // マイク入力は内蔵マイクを使用する。
+      // AllowBluetooth（HFP）は指定しないことで、音声認識開始時に
+      // Bluetooth プロファイルが A2DP → HFP に切り替わるのを防ぐ。
+      await TrackPlayer.setupPlayer({
+        iosCategory: IOSCategory.PlayAndRecord,
+        iosCategoryMode: IOSCategoryMode.Default,
+        iosCategoryOptions: [
+          IOSCategoryOptions.AllowBluetoothA2DP,
+          IOSCategoryOptions.DefaultToSpeaker,
+        ],
+      })
       await TrackPlayer.updateOptions({
         capabilities: [
           Capability.Play,
