@@ -14,7 +14,11 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.shogonakamura.autopl",
-      "minimumOsVersion": "16.0"
+      "minimumOsVersion": "16.0",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "音声コマンドでの操作に使用します。",
+        "NSSpeechRecognitionUsageDescription": "音声コマンドを認識するために使用します。"
+      }
     },
     "scheme": "autopl",
     "web": {

@@ -1,13 +1,14 @@
 import React, { useState, useCallback } from 'react'
 import { View, StyleSheet } from 'react-native'
 import {
-  Appbar,
   Dialog,
+  FAB,
   Portal,
   Text,
   Button,
   useTheme,
 } from 'react-native-paper'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { DrawerContentComponentProps } from '@react-navigation/drawer'
 import { AudioFile } from '../../types'
 import { useFileStore } from '../../stores/fileStore'
@@ -18,6 +19,7 @@ import { FileList } from './FileList'
 
 export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
   const { colors } = useTheme()
+  const insets = useSafeAreaInsets()
   const files = useFileStore((state) => state.files)
   const selectedFileId = useFileStore((state) => state.selectedFileId)
   const selectFile = useFileStore((state) => state.selectFile)
@@ -29,9 +31,7 @@ export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
   const [isDeleteDialogVisible, setIsDeleteDialogVisible] = useState(false)
 
   const handleFileSelect = useCallback(
-    (id: string) => {
-      selectFile(id)
-    },
+    (id: string) => { selectFile(id) },
     [selectFile]
   )
 
@@ -60,9 +60,7 @@ export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
   )
 
   const handleConfirmDelete = useCallback(() => {
-    if (deleteTarget) {
-      performDelete(deleteTarget)
-    }
+    if (deleteTarget) performDelete(deleteTarget)
     setIsDeleteDialogVisible(false)
     setDeleteTarget(null)
   }, [deleteTarget, performDelete])
@@ -74,18 +72,11 @@ export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}>
-      <Appbar.Header
-        style={[styles.header, { backgroundColor: colors.surface }]}
-        statusBarHeight={0}
-      >
-        <Appbar.Content title="ファイル一覧" titleStyle={styles.headerTitle} />
-        <Appbar.Action
-          icon="plus"
-          onPress={pickAndImportFile}
-          disabled={isImporting}
-          accessibilityLabel="ファイルをインポート"
-        />
-      </Appbar.Header>
+      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.surface }]}>
+        <Text variant="titleLarge" style={[styles.headerTitle, { color: colors.onSurface }]}>
+          ファイル一覧
+        </Text>
+      </View>
 
       <FileList
         files={files}
@@ -94,11 +85,22 @@ export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
         onFileDelete={handleFileDelete}
       />
 
+      <FAB
+        icon="plus"
+        label="インポート"
+        onPress={pickAndImportFile}
+        loading={isImporting}
+        disabled={isImporting}
+        style={[
+          styles.fab,
+          { backgroundColor: colors.primary, bottom: insets.bottom + 16 },
+        ]}
+        color={colors.onPrimary}
+        accessibilityLabel="ファイルをインポート"
+      />
+
       <Portal>
-        <Dialog
-          visible={isDeleteDialogVisible}
-          onDismiss={handleCancelDelete}
-        >
+        <Dialog visible={isDeleteDialogVisible} onDismiss={handleCancelDelete}>
           <Dialog.Title>再生中のファイルを削除</Dialog.Title>
           <Dialog.Content>
             <Text variant="bodyMedium">
@@ -107,10 +109,7 @@ export const DrawerContent: React.FC<DrawerContentComponentProps> = () => {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={handleCancelDelete}>キャンセル</Button>
-            <Button
-              onPress={handleConfirmDelete}
-              textColor={colors.error}
-            >
+            <Button onPress={handleConfirmDelete} textColor={colors.error}>
               削除
             </Button>
           </Dialog.Actions>
@@ -125,10 +124,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    elevation: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   headerTitle: {
-    fontSize: 18,
     fontWeight: '600',
+  },
+  fab: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    borderRadius: 14,
   },
 })
