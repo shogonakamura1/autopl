@@ -13,6 +13,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { RootStackParamList } from '../navigation/types'
 import { VoiceCommand } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useAudioDeviceRoute } from '../hooks/useAudioDeviceRoute'
+import { AudioDevicePicker } from '../components/settings/AudioDevicePicker'
 import {
   validateWakeWord,
   validateCommandWord,
@@ -55,6 +57,15 @@ const INITIAL_ERRORS: FieldErrors = {
 
 export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
   const { colors } = useTheme()
+
+  const {
+    availableInputs,
+    availableOutputs,
+    preferredInputUID,
+    preferredOutputUID,
+    selectInput,
+    selectOutput,
+  } = useAudioDeviceRoute()
 
   const storeWakeWord = useSettingsStore((state) => state.wakeWord)
   const storeCommands = useSettingsStore((state) => state.commands)
@@ -162,6 +173,33 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
+        <Text
+          variant="titleMedium"
+          style={[styles.sectionTitle, { color: colors.primary }]}
+        >
+          オーディオデバイス
+        </Text>
+        <View style={styles.deviceRow}>
+          <AudioDevicePicker
+            icon="🎤"
+            selectedUID={preferredInputUID}
+            devices={availableInputs}
+            onSelect={selectInput}
+            accessibilityLabel="マイクデバイスを選択"
+          />
+        </View>
+        <View style={[styles.deviceRow, { marginTop: 8 }]}>
+          <AudioDevicePicker
+            icon="🔊"
+            selectedUID={preferredOutputUID}
+            devices={availableOutputs}
+            onSelect={selectOutput}
+            accessibilityLabel="スピーカーデバイスを選択"
+          />
+        </View>
+
+        <Divider style={styles.divider} />
+
         <Text
           variant="titleMedium"
           style={[styles.sectionTitle, { color: colors.primary }]}
@@ -304,5 +342,8 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: 8,
+  },
+  deviceRow: {
+    flexDirection: 'row',
   },
 })
