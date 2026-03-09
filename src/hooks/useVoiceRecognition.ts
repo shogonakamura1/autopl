@@ -38,6 +38,12 @@ export const useVoiceRecognition = (
   const hasPermissionRef = useRef<boolean | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isListeningRef = useRef(false)
+  const recognitionStateRef = useRef(recognitionState)
+
+  // recognitionStateRef を常に最新値に同期
+  useEffect(() => {
+    recognitionStateRef.current = recognitionState
+  }, [recognitionState])
 
   // ネットワーク状態の監視
   useEffect(() => {
@@ -163,14 +169,14 @@ export const useVoiceRecognition = (
         setLastRecognizedText(transcript)
 
         if (
-          recognitionState === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
+          recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
         ) {
           if (containsWakeWord(transcript)) {
             ExpoSpeechRecognitionModule.stop()
             startCommandListening()
           }
         } else if (
-          recognitionState === VoiceRecognitionState.LISTENING_FOR_COMMAND
+          recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_COMMAND
         ) {
           const command = matchCommand(transcript)
           if (command && event.isFinal) {
@@ -193,7 +199,12 @@ export const useVoiceRecognition = (
     const errorSubscription = ExpoSpeechRecognitionModule.addListener(
       'error',
       (event) => {
-        console.error('[useVoiceRecognition] recognition error:', event.error)
+        // no-speech / speech-timeout はウェイクワード待機中の正常な挙動
+        if (event.error === 'no-speech' || event.error === 'speech-timeout') {
+          console.warn('[useVoiceRecognition] expected timeout:', event.error)
+        } else {
+          console.error('[useVoiceRecognition] recognition error:', event.error)
+        }
         // no-speech や speech-timeout の場合はリトライ
         if (
           isListeningRef.current &&
@@ -214,7 +225,7 @@ export const useVoiceRecognition = (
         // 認識が終了した場合、ウェイクワードモードなら再開
         if (
           isListeningRef.current &&
-          recognitionState === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
+          recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
         ) {
           setTimeout(() => {
             if (isListeningRef.current) {
@@ -230,8 +241,7 @@ export const useVoiceRecognition = (
       errorSubscription.remove()
       endSubscription.remove()
     }
-  }, [
-    recognitionState,
+  }, [ // eslint-disable-line react-hooks/exhaustive-deps
     containsWakeWord,
     matchCommand,
     startCommandListening,
