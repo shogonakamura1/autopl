@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react'
-import { View, StyleSheet, Pressable } from 'react-native'
-import { Text, useTheme } from 'react-native-paper'
+import React, { useMemo, useRef, useCallback } from 'react'
+import { View, StyleSheet, Pressable, GestureResponderEvent } from 'react-native'
+import { useTheme } from 'react-native-paper'
 
 const SEGMENT_COUNT = 10
 
@@ -10,18 +10,13 @@ interface SegmentedProgressBarProps {
   onSegmentPress: (seconds: number) => void
 }
 
-const formatTime = (seconds: number): string => {
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
 export const SegmentedProgressBar: React.FC<SegmentedProgressBarProps> = ({
   currentPosition,
   duration,
   onSegmentPress,
 }) => {
   const { colors } = useTheme()
+  const segmentWidthRef = useRef(0)
 
   const segments = useMemo(() => {
     if (duration <= 0) {
@@ -47,6 +42,16 @@ export const SegmentedProgressBar: React.FC<SegmentedProgressBarProps> = ({
     })
   }, [currentPosition, duration])
 
+  const handlePress = useCallback(
+    (event: GestureResponderEvent, startTime: number, endTime: number) => {
+      if (duration <= 0 || segmentWidthRef.current <= 0) return
+      const ratio = Math.max(0, Math.min(1, event.nativeEvent.locationX / segmentWidthRef.current))
+      const exactTime = startTime + ratio * (endTime - startTime)
+      onSegmentPress(exactTime)
+    },
+    [duration, onSegmentPress]
+  )
+
   return (
     <View style={styles.container}>
       {segments.map((segment) => (
@@ -56,8 +61,9 @@ export const SegmentedProgressBar: React.FC<SegmentedProgressBarProps> = ({
             styles.segmentRow,
             { backgroundColor: colors.surfaceVariant },
           ]}
-          onPress={() => onSegmentPress(segment.startTime)}
-          accessibilityLabel={`第${segment.index + 1}区間 ${formatTime(segment.startTime)}`}
+          onLayout={(e) => { segmentWidthRef.current = e.nativeEvent.layout.width }}
+          onPress={(event) => handlePress(event, segment.startTime, segment.endTime)}
+          accessibilityLabel={`区間${segment.index + 1}`}
           accessibilityRole="button"
         >
           <View
@@ -69,20 +75,6 @@ export const SegmentedProgressBar: React.FC<SegmentedProgressBarProps> = ({
               },
             ]}
           />
-          <View style={styles.segmentLabel}>
-            <Text
-              variant="labelSmall"
-              style={{ color: colors.onSurfaceVariant }}
-            >
-              第{segment.index + 1}段
-            </Text>
-            <Text
-              variant="labelSmall"
-              style={{ color: colors.onSurfaceVariant }}
-            >
-              {formatTime(segment.startTime)}
-            </Text>
-          </View>
         </Pressable>
       ))}
     </View>
@@ -109,11 +101,5 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     borderRadius: 6,
-  },
-  segmentLabel: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    zIndex: 1,
   },
 })

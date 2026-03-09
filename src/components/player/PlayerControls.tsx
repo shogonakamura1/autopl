@@ -1,6 +1,6 @@
 import React from 'react'
-import { View, StyleSheet } from 'react-native'
-import { IconButton, Text, useTheme } from 'react-native-paper'
+import { View, StyleSheet, Pressable } from 'react-native'
+import { Icon, IconButton, Text, useTheme } from 'react-native-paper'
 import { PlaybackRate } from '../../types'
 
 interface PlayerControlsProps {
@@ -71,19 +71,20 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onPress={onSkipForward}
           accessibilityLabel="次の区間"
         />
-        <IconButton
-          icon="speedometer"
-          size={24}
-          iconColor={colors.onSurfaceVariant}
+        <Pressable
           onPress={onPlaybackRatePress}
+          style={({ pressed }) => [
+            styles.rateButton,
+            { backgroundColor: pressed ? colors.surfaceVariant : colors.surface },
+          ]}
           accessibilityLabel={`再生速度 ${formatRate(playbackRate)}`}
-        />
-        <Text
-          variant="labelMedium"
-          style={{ color: colors.onSurfaceVariant }}
+          accessibilityRole="button"
         >
-          {formatRate(playbackRate)}
-        </Text>
+          <Icon source="speedometer" size={18} color={colors.onSurfaceVariant} />
+          <Text variant="labelMedium" style={{ color: colors.onSurfaceVariant }}>
+            {formatRate(playbackRate)}
+          </Text>
+        </Pressable>
       </View>
     </View>
   )
@@ -105,5 +106,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
+  },
+  rateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.12)',
   },
 })

@@ -20,9 +20,24 @@
         "NSSpeechRecognitionUsageDescription": "音声コマンドを認識するために使用します。"
       }
     },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "音声コマンドでの操作に使用します。",
+          "speechRecognitionPermission": "音声コマンドを認識するために使用します。"
+        }
+      ]
+    ],
     "scheme": "autopl",
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.shogonakamura.autopl"
     }
   }
 }

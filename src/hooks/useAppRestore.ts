@@ -41,13 +41,22 @@ export const useAppRestore = (): void => {
         console.error('[useAppRestore] NetInfo.fetch failed:', error)
       }
 
-      // 2. マイク権限確認
+      // 2. マイク・音声認識権限の確認＆リクエスト
+      // requestPermissionsAsync は音声認識→マイクの順でダイアログを表示する。
+      // 一度でもリクエストしないとiOS設定アプリに項目が現れないため、
+      // 未許可の場合はここで必ずリクエストする。
       try {
-        const permissionResult =
-          await ExpoSpeechRecognitionModule.getPermissionsAsync()
-        setHasMicPermission(permissionResult.granted)
+        const checkResult = await ExpoSpeechRecognitionModule.getPermissionsAsync()
+        if (!checkResult.granted) {
+          // undetermined または denied の場合はリクエストを試みる
+          // （denied の場合はiOSがダイアログを表示せず現状を返すだけ）
+          const requestResult = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
+          setHasMicPermission(requestResult.granted)
+        } else {
+          setHasMicPermission(true)
+        }
       } catch (error) {
-        console.error('[useAppRestore] getPermissionsAsync failed:', error)
+        console.error('[useAppRestore] permission check/request failed:', error)
       }
 
       // 3. ファイル存在検証（ディスクから削除されたファイルを除去）
