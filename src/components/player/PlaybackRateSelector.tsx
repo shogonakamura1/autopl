@@ -113,9 +113,10 @@ export const PlaybackRateSelector: React.FC<PlaybackRateSelectorProps> = ({
           />
 
           <View style={styles.labels}>
-            <Text variant="bodySmall" style={{ color: colors.onSurfaceVariant }}>0.25x</Text>
-            <Text variant="bodySmall" style={{ color: colors.onSurfaceVariant }}>1x</Text>
-            <Text variant="bodySmall" style={{ color: colors.onSurfaceVariant }}>2x</Text>
+            <Text variant="bodySmall" style={[styles.labelAbs, { left: 0, color: colors.onSurfaceVariant }]}>0.25x</Text>
+            <Text variant="bodySmall" style={[styles.labelAbs, { left: '25%' as unknown as number, transform: [{ translateX: -14 }], color: colors.onSurfaceVariant }]}>0.5x</Text>
+            <Text variant="bodySmall" style={[styles.labelAbs, { left: '75%' as unknown as number, transform: [{ translateX: -8 }], color: colors.onSurfaceVariant }]}>1x</Text>
+            <Text variant="bodySmall" style={[styles.labelAbs, { right: 0, color: colors.onSurfaceVariant }]}>2x</Text>
           </View>
         </View>
 
@@ -172,9 +173,12 @@ const styles = StyleSheet.create({
     height: 40,
   },
   labels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    position: 'relative',
+    height: 20,
     marginTop: 4,
+  },
+  labelAbs: {
+    position: 'absolute',
   },
   closeButton: {
     marginTop: 8,
