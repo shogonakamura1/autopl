@@ -127,17 +127,27 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
         />
       ) : (
         <View style={styles.emptyState}>
-          <Text
-            variant="bodyLarge"
-            style={{ color: colors.onSurfaceVariant }}
-          >
-            音楽ファイルをインポートして
+          <Text variant="headlineSmall" style={{ color: colors.onSurfaceVariant }}>
+            🎵
           </Text>
           <Text
             variant="bodyLarge"
-            style={{ color: colors.onSurfaceVariant }}
+            style={{ color: colors.onSurface, marginTop: 12 }}
           >
-            練習を開始してください
+            ファイルが選択されていません
+          </Text>
+          <Text
+            variant="bodyMedium"
+            style={{ color: colors.onSurfaceVariant, marginTop: 8, textAlign: 'center', lineHeight: 22 }}
+          >
+            左上の <Text style={{ fontWeight: 'bold' }}>≡</Text> をタップしてドロワーを開き、{'\n'}
+            <Text style={{ fontWeight: 'bold' }}>+</Text> ボタンから音楽ファイルをインポートしてください
+          </Text>
+          <Text
+            variant="bodySmall"
+            style={{ color: colors.onSurfaceVariant, marginTop: 16, opacity: 0.7 }}
+          >
+            対応形式: mp3 / wav / m4a
           </Text>
         </View>
       )}
