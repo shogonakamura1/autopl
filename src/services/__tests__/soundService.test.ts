@@ -1,75 +1,74 @@
 import { SoundType } from '../../constants/sounds'
-import { useSettingsStore } from '../../stores/settingsStore'
-
-const mockPlayAsync = jest.fn().mockResolvedValue(undefined)
-const mockSetPositionAsync = jest.fn().mockResolvedValue(undefined)
-const mockUnloadAsync = jest.fn().mockResolvedValue(undefined)
-const mockCreateAsync = jest.fn().mockResolvedValue({
-  sound: {
-    playAsync: mockPlayAsync,
-    setPositionAsync: mockSetPositionAsync,
-    unloadAsync: mockUnloadAsync,
-  },
-})
-const mockSetAudioModeAsync = jest.fn().mockResolvedValue(undefined)
-
-jest.mock('expo-av', () => ({
-  Audio: {
-    Sound: {
-      createAsync: (...args: unknown[]) => mockCreateAsync(...args),
-    },
-    setAudioModeAsync: (...args: unknown[]) => mockSetAudioModeAsync(...args),
-  },
-  InterruptionModeIOS: { MixWithOthers: 0 },
-  InterruptionModeAndroid: { DuckOthers: 1 },
-}))
-
-// soundService はモック設定後にインポートして最新状態を参照させる
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { soundService } = require('../soundService') as typeof import('../soundService')
 
 describe('soundService', () => {
+  let soundService: typeof import('../soundService')['soundService']
+  let mockCreateAudioPlayer: jest.Mock
+  let mockSetAudioModeAsync: jest.Mock
+  let mockPlayer: { play: jest.Mock; seekTo: jest.Mock; release: jest.Mock }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let localSettingsStore: any
+
   beforeEach(() => {
+    jest.resetModules()
     jest.clearAllMocks()
-    useSettingsStore.getState().updateSettings({ soundEnabled: true })
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const expoAudio = require('expo-audio')
+    mockCreateAudioPlayer = expoAudio.createAudioPlayer
+    mockSetAudioModeAsync = expoAudio.setAudioModeAsync
+
+    mockPlayer = {
+      play: jest.fn(),
+      seekTo: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    }
+    mockCreateAudioPlayer.mockReturnValue(mockPlayer)
+
+    // soundService と同じモジュールインスタンスの settingsStore を使う
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    localSettingsStore = require('../../stores/settingsStore').useSettingsStore
+    localSettingsStore.getState().updateSettings({ soundEnabled: true })
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    soundService = require('../soundService').soundService
   })
 
   describe('preload', () => {
-    it('オーディオモードをMixWithOthersで設定してサウンドをロードする', async () => {
+    it('オーディオモードをmixWithOthersで設定してプレイヤーを3つ作成する', async () => {
       await soundService.preload()
 
       expect(mockSetAudioModeAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ playsInSilentModeIOS: true })
+        expect.objectContaining({ interruptionMode: 'mixWithOthers' })
       )
-      expect(mockCreateAsync).toHaveBeenCalledTimes(3)
+      expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(3)
     })
   })
 
   describe('play', () => {
-    it('soundEnabledがtrueのとき再生する', async () => {
+    it('soundEnabledがtrueのときseekToとplayが呼ばれる', async () => {
       await soundService.preload()
       await soundService.play(SoundType.WAKEWORD)
 
-      expect(mockSetPositionAsync).toHaveBeenCalledWith(0)
-      expect(mockPlayAsync).toHaveBeenCalled()
+      expect(mockPlayer.seekTo).toHaveBeenCalledWith(0)
+      expect(mockPlayer.play).toHaveBeenCalled()
     })
 
     it('soundEnabledがfalseのとき再生しない', async () => {
-      useSettingsStore.getState().updateSettings({ soundEnabled: false })
+      localSettingsStore.getState().updateSettings({ soundEnabled: false })
 
       await soundService.preload()
       await soundService.play(SoundType.WAKEWORD)
 
-      expect(mockPlayAsync).not.toHaveBeenCalled()
+      expect(mockPlayer.play).not.toHaveBeenCalled()
     })
   })
 
   describe('unload', () => {
-    it('ロード済みのサウンドをアンロードする', async () => {
+    it('ロード済みのプレイヤーをreleaseする', async () => {
       await soundService.preload()
       await soundService.unload()
 
-      expect(mockUnloadAsync).toHaveBeenCalledTimes(3)
+      expect(mockPlayer.release).toHaveBeenCalled()
     })
   })
 })
