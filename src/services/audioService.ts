@@ -61,6 +61,7 @@ export const audioService = {
    * 再生する
    */
   async play(): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.play()
     } catch (error) {
@@ -73,6 +74,7 @@ export const audioService = {
    * 一時停止する
    */
   async pause(): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.pause()
     } catch (error) {
@@ -85,6 +87,7 @@ export const audioService = {
    * 指定位置にシークする（秒単位）
    */
   async seekTo(seconds: number): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.seekTo(Math.max(0, seconds))
     } catch (error) {
@@ -97,6 +100,7 @@ export const audioService = {
    * 再生速度を変更する
    */
   async setRate(rate: number): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.setRate(rate)
     } catch (error) {
@@ -109,6 +113,7 @@ export const audioService = {
    * 音量を設定する（0.0 〜 1.0）
    */
   async setVolume(volume: number): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.setVolume(Math.max(0, Math.min(1, volume)))
     } catch (error) {
@@ -121,6 +126,7 @@ export const audioService = {
    * 現在の再生位置と曲の長さを取得する
    */
   async getProgress(): Promise<{ position: number; duration: number }> {
+    if (!isPlayerSetup) return { position: 0, duration: 0 }
     try {
       const progress = await TrackPlayer.getProgress()
       return {
@@ -137,6 +143,7 @@ export const audioService = {
    * プレイヤーをリセットする（トラック解除）
    */
   async reset(): Promise<void> {
+    if (!isPlayerSetup) return
     try {
       await TrackPlayer.reset()
     } catch (error) {
