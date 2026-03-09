@@ -1,30 +1,55 @@
-import TrackPlayer, { Event } from 'react-native-track-player'
-import { SoundType } from '../constants/sounds'
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av'
+import { SoundType, SOUND_PATHS } from '../constants/sounds'
 import { useSettingsStore } from '../stores/settingsStore'
 
-/**
- * フィードバック音のファイルパスマッピング
- * TrackPlayer はローカルファイルを require() ではなくパスで扱うため、
- * assets にバンドルされた音声ファイルを参照する
- */
-const SOUND_URLS: Record<SoundType, string> = {
-  [SoundType.WAKEWORD]: 'asset:///wakeword.mp3',
-  [SoundType.SUCCESS]: 'asset:///success.mp3',
-  [SoundType.FAILURE]: 'asset:///failure.mp3',
+type SoundMap = Record<SoundType, Audio.Sound | null>
+
+const loadedSounds: SoundMap = {
+  [SoundType.WAKEWORD]: null,
+  [SoundType.SUCCESS]: null,
+  [SoundType.FAILURE]: null,
 }
 
-let isFeedbackPlaying = false
+const soundSources: Record<SoundType, number> = {
+  [SoundType.WAKEWORD]: SOUND_PATHS.WAKEWORD,
+  [SoundType.SUCCESS]: SOUND_PATHS.SUCCESS,
+  [SoundType.FAILURE]: SOUND_PATHS.FAILURE,
+}
 
 /**
  * フィードバック音サービス
- * react-native-track-player を使ってフィードバック音を再生する
+ * expo-av を使ってフィードバック音を再生する
+ *
+ * react-native-track-player（音楽再生）や expo-speech-recognition（音声認識）と
+ * 音声セッションを共有するため、InterruptionModeIOS.MixWithOthers を設定する。
+ * これにより Bluetooth プロファイルの切り替えを防ぎ、音楽再生・音声認識を中断しない。
  */
 export const soundService = {
   /**
-   * 音声ファイルをプリロードする（TrackPlayerでは不要だが互換性のため維持）
+   * 音声ファイルをプリロードする
    */
   async preload(): Promise<void> {
-    // TrackPlayer はトラック追加時にロードするためプリロード不要
+    try {
+      // MixWithOthers: TrackPlayer の音楽再生・expo-speech-recognition と共存させる
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+        shouldDuckAndroid: true,
+      })
+
+      for (const soundType of Object.values(SoundType)) {
+        if (!loadedSounds[soundType]) {
+          const { sound } = await Audio.Sound.createAsync(
+            soundSources[soundType]
+          )
+          loadedSounds[soundType] = sound
+        }
+      }
+    } catch (error) {
+      console.error('[SoundService] preload failed:', error)
+    }
   },
 
   /**
@@ -34,71 +59,33 @@ export const soundService = {
   async play(soundType: SoundType): Promise<void> {
     const soundEnabled = useSettingsStore.getState().soundEnabled
     if (!soundEnabled) return
-    if (isFeedbackPlaying) return
 
     try {
-      isFeedbackPlaying = true
-
-      // 現在のキューを保存して復元するのではなく、
-      // 短い効果音なのでキューの末尾に追加して再生後に削除する
-      const queue = await TrackPlayer.getQueue()
-      const currentTrackIndex = await TrackPlayer.getActiveTrackIndex()
-      const progress = await TrackPlayer.getProgress()
-
-      const feedbackTrack = {
-        id: `feedback-${soundType}-${Date.now()}`,
-        url: SOUND_URLS[soundType],
-        title: soundType,
-        artist: 'Autopl',
-      }
-
-      await TrackPlayer.add(feedbackTrack)
-      const newQueue = await TrackPlayer.getQueue()
-      await TrackPlayer.skip(newQueue.length - 1)
-      await TrackPlayer.play()
-
-      // 再生完了を待つ
-      await new Promise<void>((resolve) => {
-        const subscription = TrackPlayer.addEventListener(
-          Event.PlaybackQueueEnded,
-          () => {
-            subscription.remove()
-            resolve()
-          }
-        )
-        // 最大3秒でタイムアウト
-        setTimeout(() => {
-          subscription.remove()
-          resolve()
-        }, 3000)
-      })
-
-      // フィードバックトラックを削除して元の状態に復元
-      const updatedQueue = await TrackPlayer.getQueue()
-      const feedbackIndex = updatedQueue.findIndex(
-        (track) => track.id === feedbackTrack.id
-      )
-      if (feedbackIndex >= 0) {
-        await TrackPlayer.remove(feedbackIndex)
-      }
-
-      // 元のトラックに戻る
-      if (queue.length > 0 && currentTrackIndex !== undefined) {
-        await TrackPlayer.skip(currentTrackIndex)
-        await TrackPlayer.seekTo(progress.position)
+      const sound = loadedSounds[soundType]
+      if (sound) {
+        await sound.setPositionAsync(0)
+        await sound.playAsync()
       }
     } catch (error) {
       // フィードバック音の再生失敗はUIをブロックしない
       console.error('[SoundService] play failed:', error)
-    } finally {
-      isFeedbackPlaying = false
     }
   },
 
   /**
-   * リソースを解放する（TrackPlayerでは不要だが互換性のため維持）
+   * リソースを解放する
    */
   async unload(): Promise<void> {
-    // TrackPlayer のリソース解放は audioService.reset() で行う
+    for (const soundType of Object.values(SoundType)) {
+      try {
+        const sound = loadedSounds[soundType]
+        if (sound) {
+          await sound.unloadAsync()
+          loadedSounds[soundType] = null
+        }
+      } catch (error) {
+        console.error('[SoundService] unload failed:', error)
+      }
+    }
   },
 }
