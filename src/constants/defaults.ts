@@ -76,4 +76,5 @@ export const STORAGE_KEYS = {
   SELECTED_FILE_ID: 'selected_file_id',
   SETTINGS: 'settings',
   ONBOARDING_DONE: 'onboarding_done',
+  AUDIO_DEVICE: 'audio_device',
 } as const
