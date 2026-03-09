@@ -1,28 +1,29 @@
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av'
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio'
+import type { AudioPlayer } from 'expo-audio'
 import { SoundType, SOUND_PATHS } from '../constants/sounds'
 import { useSettingsStore } from '../stores/settingsStore'
 
-type SoundMap = Record<SoundType, Audio.Sound | null>
+type PlayerMap = Record<SoundType, AudioPlayer | null>
 
-const loadedSounds: SoundMap = {
-  [SoundType.WAKEWORD]: null,
-  [SoundType.SUCCESS]: null,
-  [SoundType.FAILURE]: null,
-}
-
-const soundSources: Record<SoundType, number> = {
+const SOUND_SOURCES: Record<SoundType, number> = {
   [SoundType.WAKEWORD]: SOUND_PATHS.WAKEWORD,
   [SoundType.SUCCESS]: SOUND_PATHS.SUCCESS,
   [SoundType.FAILURE]: SOUND_PATHS.FAILURE,
 }
 
+const players: PlayerMap = {
+  [SoundType.WAKEWORD]: null,
+  [SoundType.SUCCESS]: null,
+  [SoundType.FAILURE]: null,
+}
+
 /**
  * フィードバック音サービス
- * expo-av を使ってフィードバック音を再生する
+ * expo-audio を使ってフィードバック音を再生する
  *
- * react-native-track-player（音楽再生）や expo-speech-recognition（音声認識）と
- * 音声セッションを共有するため、InterruptionModeIOS.MixWithOthers を設定する。
- * これにより Bluetooth プロファイルの切り替えを防ぎ、音楽再生・音声認識を中断しない。
+ * keepAudioSessionActive: true により、再生終了後に音声セッションが
+ * 非アクティブ化されず、TrackPlayer や expo-speech-recognition を中断しない。
+ * interruptionMode: 'mixWithOthers' で他の音声セッションと共存する。
  */
 export const soundService = {
   /**
@@ -30,21 +31,20 @@ export const soundService = {
    */
   async preload(): Promise<void> {
     try {
-      // MixWithOthers: TrackPlayer の音楽再生・expo-speech-recognition と共存させる
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'mixWithOthers',
+        allowsRecording: false,
+        shouldPlayInBackground: false,
+        shouldRouteThroughEarpiece: false,
       })
 
       for (const soundType of Object.values(SoundType)) {
-        if (!loadedSounds[soundType]) {
-          const { sound } = await Audio.Sound.createAsync(
-            soundSources[soundType]
-          )
-          loadedSounds[soundType] = sound
+        if (!players[soundType]) {
+          players[soundType] = createAudioPlayer(SOUND_SOURCES[soundType], {
+            // 再生完了後も音声セッションを維持してTrackPlayerを中断しない
+            keepAudioSessionActive: true,
+          })
         }
       }
     } catch (error) {
@@ -61,10 +61,10 @@ export const soundService = {
     if (!soundEnabled) return
 
     try {
-      const sound = loadedSounds[soundType]
-      if (sound) {
-        await sound.setPositionAsync(0)
-        await sound.playAsync()
+      const player = players[soundType]
+      if (player) {
+        await player.seekTo(0)
+        player.play()
       }
     } catch (error) {
       // フィードバック音の再生失敗はUIをブロックしない
@@ -78,10 +78,10 @@ export const soundService = {
   async unload(): Promise<void> {
     for (const soundType of Object.values(SoundType)) {
       try {
-        const sound = loadedSounds[soundType]
-        if (sound) {
-          await sound.unloadAsync()
-          loadedSounds[soundType] = null
+        const player = players[soundType]
+        if (player) {
+          player.release()
+          players[soundType] = null
         }
       } catch (error) {
         console.error('[SoundService] unload failed:', error)
