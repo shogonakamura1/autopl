@@ -28,22 +28,25 @@ export const useAudioDeviceRoute = () => {
         AudioRoute.getAvailableOutputs(),
       ])
 
-      // Bluetooth デバイスは入出力両対応のため、両方のピッカーに表示する（#63）
-      // ユーザーがマイクとしてもスピーカーとしても選択できるようにする
-      const bluetoothTypes = ['BluetoothHFP', 'BluetoothA2DPOutput', 'BluetoothLE']
-      const isBluetooth = (device: AudioPort) =>
-        bluetoothTypes.includes(device.type)
+      // Bluetooth デバイスのマージ戦略（#63, #67 で改善）
+      // - HFP/LE デバイス（双方向）: 入出力両方のピッカーに表示
+      // - A2DP 出力専用デバイス: スピーカーピッカーのみに表示
+      //   A2DP はマイク非対応のため入力リストに含めない
+      const isBidirectionalBluetooth = (device: AudioPort) =>
+        device.type === 'BluetoothHFP' || device.type === 'BluetoothLE'
 
+      // 入力リスト: HFP/LE デバイスのみ出力側からマージ（A2DP は含めない）
       const mergedInputs = [...inputs]
-      for (const device of outputs.filter(isBluetooth)) {
-        if (!mergedInputs.some((d) => d.uid === device.uid)) {
+      for (const device of outputs.filter(isBidirectionalBluetooth)) {
+        if (!mergedInputs.some((d) => d.uid === device.uid || d.name === device.name)) {
           mergedInputs.push(device)
         }
       }
 
+      // 出力リスト: HFP/LE デバイスを入力側からマージ（A2DP はネイティブ層で追加済み）
       const mergedOutputs = [...outputs]
-      for (const device of inputs.filter(isBluetooth)) {
-        if (!mergedOutputs.some((d) => d.uid === device.uid)) {
+      for (const device of inputs.filter(isBidirectionalBluetooth)) {
+        if (!mergedOutputs.some((d) => d.uid === device.uid || d.name === device.name)) {
           mergedOutputs.push(device)
         }
       }

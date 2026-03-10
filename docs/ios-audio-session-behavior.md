@@ -185,6 +185,42 @@ AI がオーディオ関連のバグを修正する際、推測ではなくこ�
 
 ---
 
+## 11. `.defaultToSpeaker` と Bluetooth HFP マイクルーティングの競合
+
+### 確認済みの事実
+
+- `.defaultToSpeaker` は「受話器ではなく内蔵スピーカーから出力する」オプション
+- HFP は入出力同期プロトコル: `setPreferredInput` で Bluetooth マイクを選択すると、出力も自動的に同じ Bluetooth デバイスに切り替わる（Apple Technical Q&A QA1799）
+- `.defaultToSpeaker` が出力を内蔵スピーカーに強制すると、HFP の入出力同期と矛盾が発生
+- iOS はこの矛盾を「Bluetooth マイクの `setPreferredInput` を無視する」ことで解決する
+- 結果: `setPreferredInput` を正しく呼んでも内蔵マイクが使われ続ける（#67 で判明）
+- Apple Developer Forums #713197, #730600 で同じ問題が報告されている
+
+### 対策（現在の実装）
+
+- `prepareSessionForRecognition` で Bluetooth マイク選択時は `.defaultToSpeaker` を除外（#67）
+- `expo-speech-recognition.start()` に渡す `iosCategory` も動的に構築し、同じオプションを使用
+- Bluetooth マイク未選択時（内蔵マイク使用時）のみ `.defaultToSpeaker` を含める
+
+---
+
+## 12. A2DP 出力専用デバイスの追跡
+
+### 確認済みの事実
+
+- A2DP 出力専用デバイス（Bluetooth スピーカー等）は `availableInputs` に含まれない
+- `currentRoute.outputs` に含まれるのは**現在アクティブな**出力のみ
+- 別のデバイスがアクティブ出力になると、A2DP スピーカーは `currentRoute.outputs` から消失する
+- iOS には `availableOutputs` API が存在しないため、非アクティブな出力デバイスを列挙する手段がない
+
+### 対策（現在の実装）
+
+- `AVAudioSession.routeChangeNotification` を監視し、A2DP デバイスをモジュールレベルでキャッシュ（#67）
+- `getAvailableOutputs` でキャッシュされた A2DP デバイスも含めて返す
+- TS 層では A2DP デバイスをスピーカーピッカーのみに表示（マイク非対応のため入力ピッカーには含めない）
+
+---
+
 ## 追記ルール
 
 新しい事実が判明した場合、以下の形式で追記すること:
