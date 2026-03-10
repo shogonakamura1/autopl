@@ -181,16 +181,14 @@ export const SettingsScreen: React.FC<Props> = ({ navigation }) => {
         </Text>
         <View style={styles.deviceRow}>
           <AudioDevicePicker
-            icon="🎤"
+            iconName="microphone"
             selectedUID={preferredInputUID}
             devices={availableInputs}
             onSelect={selectInput}
             accessibilityLabel="マイクデバイスを選択"
           />
-        </View>
-        <View style={[styles.deviceRow, { marginTop: 8 }]}>
           <AudioDevicePicker
-            icon="🔊"
+            iconName="volume-high"
             selectedUID={preferredOutputUID}
             devices={availableOutputs}
             onSelect={selectOutput}
@@ -345,5 +343,6 @@ const styles = StyleSheet.create({
   },
   deviceRow: {
     flexDirection: 'row',
+    gap: 8,
   },
 })
