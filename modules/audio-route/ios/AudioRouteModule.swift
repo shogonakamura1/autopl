@@ -31,21 +31,45 @@ public class AudioRouteModule: Module {
     }
 
     // 利用可能な出力デバイス一覧を返す
-    // 内蔵スピーカーは常に含める。現在接続中の外部デバイス（Bluetooth/有線）も列挙。
+    // 1. currentRoute.outputs から現在アクティブな外部デバイスを列挙
+    // 2. availableInputs から HFP 双方向デバイスを追加（#65）
+    //    HFP デバイスは入出力両対応だが currentRoute.outputs に出ない場合がある
+    //    （例: A2DP で別デバイスが出力中の場合）
+    // 3. 内蔵スピーカーは常に含める
     AsyncFunction("getAvailableOutputs") { () -> [[String: String]] in
+      let session = AVAudioSession.sharedInstance()
       var outputs: [[String: String]] = []
+      var seenUIDs = Set<String>()
 
-      let currentOutputs = AVAudioSession.sharedInstance().currentRoute.outputs
-      for port in currentOutputs {
+      // 1. 現在アクティブな出力デバイス
+      for port in session.currentRoute.outputs {
         if port.portType != .builtInSpeaker {
           outputs.append([
             "uid": port.uid,
             "name": port.portName,
             "type": port.portType.rawValue,
           ])
+          seenUIDs.insert(port.uid)
         }
       }
 
+      // 2. availableInputs に含まれる Bluetooth HFP/LE デバイスは双方向なので
+      //    出力としても選択可能。currentRoute に出ていないものを追加する
+      if let inputs = session.availableInputs {
+        let btInputTypes: [AVAudioSession.Port] = [.bluetoothHFP, .bluetoothLE]
+        for port in inputs where btInputTypes.contains(port.portType) {
+          if !seenUIDs.contains(port.uid) {
+            outputs.append([
+              "uid": port.uid,
+              "name": port.portName,
+              "type": port.portType.rawValue,
+            ])
+            seenUIDs.insert(port.uid)
+          }
+        }
+      }
+
+      // 3. 内蔵スピーカーは常に含める
       outputs.append([
         "uid": "builtin_speaker",
         "name": "内蔵スピーカー",
@@ -98,6 +122,46 @@ public class AudioRouteModule: Module {
         try session.overrideOutputAudioPort(.speaker)
       } else {
         try session.overrideOutputAudioPort(.none)
+      }
+    }
+
+    // 音声認識開始前に audio session を設定し、Bluetooth マイクを preferred input に設定する（#65）
+    //
+    // expo-speech-recognition の内部フロー:
+    //   1. setupAudioSession() → setCategory + setActive
+    //   2. AVAudioEngine() → inputNode が「この時点の」入力デバイスをキャプチャ
+    //   3. audioEngine.start()
+    //   4. startHandler() → ← ここで setPreferredInput しても手遅れ
+    //
+    // この関数を ExpoSpeechRecognitionModule.start() の前に呼ぶことで:
+    //   - setCategory(.playAndRecord, allowBluetooth) が先に実行される
+    //   - Bluetooth デバイスが availableInputs に出現する
+    //   - setPreferredInput で Bluetooth マイクが設定される
+    //   - expo-speech-recognition が同じ category を設定 → no-op（preferredInput 維持）
+    //   - AVAudioEngine.inputNode が Bluetooth マイクをキャプチャする
+    AsyncFunction("prepareSessionForRecognition") { (uid: String?, name: String?) throws in
+      let session = AVAudioSession.sharedInstance()
+
+      // expo-speech-recognition と同じカテゴリ・オプションを設定
+      // 先に設定しておくことで、expo-speech-recognition 側の setCategory は no-op になる
+      try session.setCategory(
+        .playAndRecord,
+        mode: .default,
+        options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers]
+      )
+      try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+      // allowBluetooth が有効な状態で setPreferredInput を実行
+      // この時点で availableInputs に Bluetooth デバイスが含まれている
+      guard let uid = uid else { return }
+      guard let inputs = session.availableInputs else { return }
+
+      // UID 完全一致 → 名前フォールバック（プロファイル切替で UID 変更時）
+      if let port = inputs.first(where: { $0.uid == uid }) {
+        try session.setPreferredInput(port)
+      } else if let name = name,
+                let port = inputs.first(where: { $0.portName == name }) {
+        try session.setPreferredInput(port)
       }
     }
 
