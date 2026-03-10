@@ -4,6 +4,8 @@ import NetInfo from '@react-native-community/netinfo'
 import { VoiceCommand, VoiceRecognitionState } from '../types'
 import { useVoiceStore } from '../stores/voiceStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useAudioDeviceStore } from '../stores/audioDeviceStore'
+import * as AudioRoute from '../../modules/audio-route'
 
 interface UseVoiceRecognitionResult {
   recognitionState: VoiceRecognitionState
@@ -16,17 +18,19 @@ interface UseVoiceRecognitionResult {
 }
 
 // expo-speech-recognition の iOS 音声セッション設定
-// allowBluetoothA2DP: Bluetooth を A2DP（高音質）のまま維持し HFP 切り替えを防止
-// defaultToSpeaker: Bluetooth 未接続時はスピーカーを使用
-// mixWithOthers: TrackPlayer の再生を中断しない
-// mode: 'default'（measurement モードは再生音量を下げるため使わない）
+// allowBluetooth:     Bluetooth マイクを使用可能にする（HFP）
+// allowBluetoothA2DP: Bluetooth マイク未使用時は A2DP 高音質を維持
+// defaultToSpeaker:   Bluetooth 未接続時はスピーカーを使用
+// mixWithOthers:      TrackPlayer の再生を中断しない
+// mode: 'default'     measurement モードは再生音量を下げるため使わない
 const IOS_AUDIO_SESSION_OPTIONS = {
   category: 'playAndRecord' as const,
   categoryOptions: [
+    'allowBluetooth',
     'allowBluetoothA2DP',
     'defaultToSpeaker',
     'mixWithOthers',
-  ] as ('allowBluetoothA2DP' | 'defaultToSpeaker' | 'mixWithOthers')[],
+  ] as ('allowBluetooth' | 'allowBluetoothA2DP' | 'defaultToSpeaker' | 'mixWithOthers')[],
   mode: 'default' as const,
 }
 
@@ -53,15 +57,14 @@ export const useVoiceRecognition = (
   const hasPermissionRef = useRef<boolean | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isListeningRef = useRef(false)
+  const isSessionActiveRef = useRef(false)
   const recognitionStateRef = useRef(recognitionState)
   const isOnlineRef = useRef(isOnline)
 
-  // isOnlineRef を最新値に同期
   useEffect(() => {
     isOnlineRef.current = isOnline
   }, [isOnline])
 
-  // 状態を ref と store の両方に同期的に更新する
   const updateState = useCallback(
     (state: VoiceRecognitionState) => {
       recognitionStateRef.current = state
@@ -70,7 +73,6 @@ export const useVoiceRecognition = (
     [setRecognitionState]
   )
 
-  // ネットワーク状態の監視
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOnline(state.isConnected ?? false)
@@ -78,7 +80,6 @@ export const useVoiceRecognition = (
     return () => unsubscribe()
   }, [setIsOnline])
 
-  // 権限チェック
   const requestPermission = useCallback(async (): Promise<boolean> => {
     try {
       const result =
@@ -92,7 +93,6 @@ export const useVoiceRecognition = (
     }
   }, [])
 
-  // 認識テキストからコマンドを解析
   const matchCommand = useCallback(
     (text: string): VoiceCommand | null => {
       const normalizedText = text.trim().toLowerCase()
@@ -106,7 +106,6 @@ export const useVoiceRecognition = (
     [commands]
   )
 
-  // ウェイクワード検出チェック
   const containsWakeWord = useCallback(
     (text: string): boolean => {
       return text.trim().toLowerCase().includes(wakeWord.toLowerCase())
@@ -114,7 +113,6 @@ export const useVoiceRecognition = (
     [wakeWord]
   )
 
-  // タイムアウトをクリア
   const clearCommandTimeout = useCallback(() => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
@@ -123,8 +121,7 @@ export const useVoiceRecognition = (
   }, [])
 
   // 単一の continuous セッションを開始する
-  // wakeword → command の遷移で stop/start を繰り返さないことで
-  // 音楽の途切れを防止する
+  // wakeword → command の遷移で stop/start を繰り返さないことで音楽の途切れを防止する
   const startRecognition = useCallback(() => {
     try {
       ExpoSpeechRecognitionModule.start({
@@ -140,7 +137,6 @@ export const useVoiceRecognition = (
     }
   }, [wakeWord, commands])
 
-  // 音声認識を停止
   const stopListening = useCallback(() => {
     clearCommandTimeout()
     isListeningRef.current = false
@@ -153,15 +149,28 @@ export const useVoiceRecognition = (
     setLastRecognizedText(null)
   }, [clearCommandTimeout, updateState, setLastRecognizedText])
 
-  // ウェイクワード監視を開始（外部API）
   const startWakeWordListening = useCallback(() => {
     isListeningRef.current = true
     updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
     startRecognition()
   }, [updateState, startRecognition])
 
-  // 音声認識イベントリスナー
   useEffect(() => {
+    // セッション開始イベント:
+    // expo-speech-recognition が setCategory + setActive を完了したタイミングで
+    // preferredInput を適用する。この時点では allowBluetooth が有効になっているため
+    // Bluetooth マイクが availableInputs に現れ、setPreferredInput が成功する
+    const startSubscription = ExpoSpeechRecognitionModule.addListener(
+      'start',
+      () => {
+        isSessionActiveRef.current = true
+        const { preferredInputUID } = useAudioDeviceStore.getState()
+        AudioRoute.setPreferredInput(preferredInputUID).catch((err) => {
+          console.error('[useVoiceRecognition] setPreferredInput failed:', err)
+        })
+      }
+    )
+
     const resultSubscription = ExpoSpeechRecognitionModule.addListener(
       'result',
       (event) => {
@@ -178,7 +187,6 @@ export const useVoiceRecognition = (
             // stop/start しないことで音楽の途切れを防止する
             updateState(VoiceRecognitionState.LISTENING_FOR_COMMAND)
 
-            // コマンドタイムアウトを設定
             clearCommandTimeout()
             timeoutRef.current = setTimeout(() => {
               if (
@@ -202,10 +210,14 @@ export const useVoiceRecognition = (
             onCommandRecognized(command)
 
             // フィードバック音の後にウェイクワード待機に戻る
+            // セッションが PROCESSING 中に終了していた場合は再開する
             setTimeout(() => {
               if (isListeningRef.current) {
                 updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
                 setLastRecognizedText(null)
+                if (!isSessionActiveRef.current) {
+                  startRecognition()
+                }
               }
             }, 500)
           }
@@ -228,16 +240,19 @@ export const useVoiceRecognition = (
     const endSubscription = ExpoSpeechRecognitionModule.addListener(
       'end',
       () => {
+        isSessionActiveRef.current = false
+
         if (!isListeningRef.current) return
 
         // セッションが自然終了（iOS 制限 / タイムアウト）→ 再開
-        // PROCESSING 中（コマンド実行直後の 500ms）は再開しない
+        // 状態はリセットしない: LISTENING_FOR_COMMAND 中に end が来ても
+        // コマンド待機を継続するため、現在の状態のままセッションを再起動する
+        // PROCESSING 中（コマンド実行直後の 500ms）は 500ms コールバックが再開を担う
         setTimeout(() => {
           if (
             isListeningRef.current &&
             recognitionStateRef.current !== VoiceRecognitionState.PROCESSING
           ) {
-            updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
             startRecognition()
           }
         }, 300)
@@ -245,6 +260,7 @@ export const useVoiceRecognition = (
     )
 
     return () => {
+      startSubscription.remove()
       resultSubscription.remove()
       errorSubscription.remove()
       endSubscription.remove()
@@ -260,7 +276,6 @@ export const useVoiceRecognition = (
     timeoutSeconds,
   ])
 
-  // クリーンアップ
   useEffect(() => {
     return () => {
       clearCommandTimeout()
