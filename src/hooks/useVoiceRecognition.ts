@@ -60,6 +60,11 @@ export const useVoiceRecognition = (
   const isSessionActiveRef = useRef(false)
   const recognitionStateRef = useRef(recognitionState)
   const isOnlineRef = useRef(isOnline)
+  // ウェイクワード検出時のトランスクリプトを記録し、
+  // コマンドマッチング時は新しいテキストのみを対象にする（#63）
+  // continuous モードでトランスクリプトが蓄積されると、前回のコマンド（例: 「再生」）が
+  // 残り続け、常に PLAY がマッチする問題を防ぐ
+  const wakeWordTranscriptRef = useRef('')
 
   useEffect(() => {
     isOnlineRef.current = isOnline
@@ -158,21 +163,32 @@ export const useVoiceRecognition = (
     // expo-speech-recognition が setCategory + setActive を完了したタイミングで
     // preferredInput を適用する。allowBluetooth が有効な状態で呼ぶため
     // Bluetooth マイクが availableInputs に含まれ setPreferredInput が成功する
+    // セッション開始イベント:
+    // expo-speech-recognition が setCategory(.playAndRecord, .allowBluetooth) + setActive を
+    // 完了したタイミング。このタイミングで初めて Bluetooth マイクが availableInputs に出現するため、
+    // setPreferredInput をここで適用する。
+    // UID 不一致時（プロファイル切替で UID が変わった場合）は名前でフォールバックする（#63）
     const startSubscription = ExpoSpeechRecognitionModule.addListener(
       'start',
       async () => {
         isSessionActiveRef.current = true
 
         try {
-          const { preferredInputUID } = useAudioDeviceStore.getState()
+          const { preferredInputUID, preferredInputName } =
+            useAudioDeviceStore.getState()
           if (preferredInputUID) {
-            await AudioRoute.setPreferredInput(preferredInputUID)
+            // UID + 名前を渡す。ネイティブ側で UID 一致を試行し、
+            // 失敗時は名前でフォールバック検索する
+            await AudioRoute.setPreferredInput(
+              preferredInputUID,
+              preferredInputName
+            )
           } else {
             // 明示的に選択されていない場合は最初の利用可能デバイスを自動選択
             // （開発用: 内蔵マイクはフィルタ済みなので外部デバイスが優先される）
             const inputs = await AudioRoute.getAvailableInputs()
             if (inputs.length > 0) {
-              await AudioRoute.setPreferredInput(inputs[0].uid)
+              await AudioRoute.setPreferredInput(inputs[0].uid, inputs[0].name)
             }
           }
         } catch (err) {
@@ -197,6 +213,9 @@ export const useVoiceRecognition = (
           recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
         ) {
           if (containsWakeWord(transcript)) {
+            // ウェイクワード検出時のトランスクリプトを記録（#63）
+            // コマンドマッチング時にこの部分を除外し、蓄積テキストによる誤マッチを防ぐ
+            wakeWordTranscriptRef.current = transcript
             updateState(VoiceRecognitionState.LISTENING_FOR_COMMAND)
 
             clearCommandTimeout()
@@ -214,7 +233,18 @@ export const useVoiceRecognition = (
         } else if (
           recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_COMMAND
         ) {
-          const command = matchCommand(transcript)
+          // continuous モードではトランスクリプトが蓄積される場合がある（#63）
+          // ウェイクワード部分を除外して新しいテキストのみでコマンドマッチングする
+          // これにより前回の「再生」等が残って常にPLAYがマッチする問題を防ぐ
+          let commandText = transcript
+          const wakeWordPart = wakeWordTranscriptRef.current
+          if (wakeWordPart && transcript.startsWith(wakeWordPart)) {
+            commandText = transcript.substring(wakeWordPart.length).trim()
+          }
+          // commandText が空の場合はまだ新しいテキストがない（ウェイクワードの確定イベント等）
+          if (!commandText) return
+
+          const command = matchCommand(commandText)
           if (command) {
             clearCommandTimeout()
             updateState(VoiceRecognitionState.PROCESSING)

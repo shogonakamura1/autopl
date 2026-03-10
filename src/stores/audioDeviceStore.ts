@@ -5,12 +5,13 @@ import { STORAGE_KEYS } from '../constants/defaults'
 
 interface AudioDeviceState {
   preferredInputUID: string | null
+  preferredInputName: string | null
   preferredOutputUID: string | null
   isManuallySet: boolean
 }
 
 interface AudioDeviceActions {
-  setPreferredInput: (uid: string | null) => void
+  setPreferredInput: (uid: string | null, name?: string | null) => void
   setPreferredOutput: (uid: string | null) => void
   resetToAuto: () => void
 }
@@ -19,11 +20,16 @@ export const useAudioDeviceStore = create<AudioDeviceState & AudioDeviceActions>
   persist(
     (set) => ({
       preferredInputUID: null,
+      preferredInputName: null,
       preferredOutputUID: null,
       isManuallySet: false,
 
-      setPreferredInput: (uid) =>
-        set({ preferredInputUID: uid, isManuallySet: true }),
+      setPreferredInput: (uid, name) =>
+        set({
+          preferredInputUID: uid,
+          preferredInputName: name ?? null,
+          isManuallySet: true,
+        }),
 
       setPreferredOutput: (uid) =>
         set({ preferredOutputUID: uid, isManuallySet: true }),
@@ -31,6 +37,7 @@ export const useAudioDeviceStore = create<AudioDeviceState & AudioDeviceActions>
       resetToAuto: () =>
         set({
           preferredInputUID: null,
+          preferredInputName: null,
           preferredOutputUID: null,
           isManuallySet: false,
         }),

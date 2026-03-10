@@ -8,13 +8,14 @@ public class AudioRouteModule: Module {
     // 接続済み入力デバイス（マイク）一覧を返す
     // 開発用: 内蔵マイクは除外し外部デバイスのみ返す
     // setCategory は呼ばない（音楽再生を中断させないため）
-    // A2DP 接続中の Bluetooth デバイスは currentRoute.outputs から補完する
+    // A2DP 出力専用デバイスは入力リストに含めない（#63 で修正）
+    // Bluetooth デバイスは TS 層で両ピッカーに統合される
     AsyncFunction("getAvailableInputs") { () -> [[String: String]] in
       let session = AVAudioSession.sharedInstance()
       var result: [[String: String]] = []
 
       if let inputs = session.availableInputs {
-        // 開発用: 内蔵マイク (builtInMicrophone) を除外
+        // 開発用: 内蔵マイクを除外
         result = inputs
           .filter { $0.portType != .builtInMic }
           .map { port in
@@ -24,19 +25,6 @@ public class AudioRouteModule: Module {
               "type": port.portType.rawValue,
             ]
           }
-      }
-
-      // A2DP 接続中の Bluetooth デバイスが availableInputs に出ない場合でも
-      // マイク候補として追加する（allowBluetooth 未設定時の補完）
-      let btOutputTypes: [AVAudioSession.Port] = [.bluetoothA2DP, .bluetoothLE]
-      for port in session.currentRoute.outputs where btOutputTypes.contains(port.portType) {
-        if !result.contains(where: { $0["uid"] == port.uid }) {
-          result.append([
-            "uid": port.uid,
-            "name": port.portName,
-            "type": AVAudioSession.Port.bluetoothHFP.rawValue,
-          ])
-        }
       }
 
       return result
@@ -70,7 +58,9 @@ public class AudioRouteModule: Module {
     // 優先する入力デバイス（マイク）を設定する。nil で自動に戻す。
     // セッション変更は行わない: Bluetooth デバイスが availableInputs に含まれない場合は
     // 何もしない（音声認識の start イベントで allowBluetooth が有効な状態で再試行される）
-    AsyncFunction("setPreferredInput") { (uid: String?) throws in
+    // uid と name の両方を受け取り、UID 不一致時は名前でフォールバック検索する（#63）
+    // Bluetooth プロファイル切り替え（A2DP↔HFP）で UID が変わる問題に対応
+    AsyncFunction("setPreferredInput") { (uid: String?, name: String?) throws in
       let session = AVAudioSession.sharedInstance()
 
       guard let uid = uid else {
@@ -78,14 +68,24 @@ public class AudioRouteModule: Module {
         return
       }
 
-      guard let inputs = session.availableInputs,
-            let port = inputs.first(where: { $0.uid == uid }) else {
-        // availableInputs に見つからない場合はセッション変更せず何もしない
-        // 音声認識開始時に allowBluetooth が有効になった後に再適用される
+      guard let inputs = session.availableInputs else { return }
+
+      // 1. UID 完全一致を試行
+      if let port = inputs.first(where: { $0.uid == uid }) {
+        try session.setPreferredInput(port)
         return
       }
 
-      try session.setPreferredInput(port)
+      // 2. UID 不一致の場合、デバイス名でフォールバック検索
+      //    Bluetooth プロファイル切り替え（A2DP→HFP）で UID が変わるケースに対応
+      if let name = name,
+         let port = inputs.first(where: { $0.portName == name }) {
+        try session.setPreferredInput(port)
+        return
+      }
+
+      // availableInputs に見つからない場合はセッション変更せず何もしない
+      // 音声認識開始時に allowBluetooth が有効になった後に再適用される
     }
 
     // 優先する出力デバイスを設定する。

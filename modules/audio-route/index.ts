@@ -15,8 +15,12 @@ export const getAvailableInputs = (): Promise<AudioPort[]> =>
 export const getAvailableOutputs = (): Promise<AudioPort[]> =>
   AudioRouteNativeModule?.getAvailableOutputs() ?? Promise.resolve([])
 
-export const setPreferredInput = (uid: string | null): Promise<void> =>
-  AudioRouteNativeModule?.setPreferredInput(uid) ?? Promise.resolve()
+export const setPreferredInput = (
+  uid: string | null,
+  name?: string | null
+): Promise<void> =>
+  AudioRouteNativeModule?.setPreferredInput(uid, name ?? null) ??
+  Promise.resolve()
 
 export const setPreferredOutput = (uid: string): Promise<void> =>
   AudioRouteNativeModule?.setPreferredOutput(uid) ?? Promise.resolve()

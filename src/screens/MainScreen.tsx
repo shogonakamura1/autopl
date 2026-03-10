@@ -40,15 +40,17 @@ export const MainScreen: React.FC<Props> = ({ navigation }) => {
     const previousState = previousRecognitionStateRef.current
     previousRecognitionStateRef.current = recognitionState
 
-    const wasListeningOrProcessing =
-      previousState === VoiceRecognitionState.LISTENING_FOR_COMMAND ||
-      previousState === VoiceRecognitionState.PROCESSING
+    // コマンド未検出時のみスナックバーを表示する（#63）
+    // LISTENING_FOR_COMMAND → WAKEWORD/IDLE: タイムアウト（コマンド未検出）→ スナックバー表示
+    // PROCESSING → WAKEWORD: コマンド検出・処理済み → スナックバーは表示しない
+    const wasListeningForCommand =
+      previousState === VoiceRecognitionState.LISTENING_FOR_COMMAND
 
     const isNowIdle =
       recognitionState === VoiceRecognitionState.IDLE ||
       recognitionState === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
 
-    if (wasListeningOrProcessing && isNowIdle) {
+    if (wasListeningForCommand && isNowIdle) {
       const lastText = useVoiceStore.getState().lastRecognizedText
       if (lastText === null) {
         setIsFailureSnackbarVisible(true)
