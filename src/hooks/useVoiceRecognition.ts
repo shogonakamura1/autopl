@@ -17,21 +17,29 @@ interface UseVoiceRecognitionResult {
   requestPermission: () => Promise<boolean>
 }
 
-// expo-speech-recognition の iOS 音声セッション設定
-// allowBluetooth:     Bluetooth マイクを使用可能にする（HFP）
-// allowBluetoothA2DP: Bluetooth マイク未使用時は A2DP 高音質を維持
-// defaultToSpeaker:   Bluetooth 未接続時はスピーカーを使用
-// mixWithOthers:      TrackPlayer の再生を中断しない
-// mode: 'default'     measurement モードは再生音量を下げるため使わない
-const IOS_AUDIO_SESSION_OPTIONS = {
-  category: 'playAndRecord' as const,
-  categoryOptions: [
+// expo-speech-recognition の iOS 音声セッション設定を動的に構築する（#67）
+// Bluetooth マイク選択時は defaultToSpeaker を除外する。
+// HFP は入出力同期プロトコルであり、defaultToSpeaker が出力を内蔵スピーカーに
+// 強制すると iOS が HFP 同期を維持できず setPreferredInput を無視する。
+// ref: Apple Developer Forums #713197, #730600
+type IosCategoryOption = 'allowBluetooth' | 'allowBluetoothA2DP' | 'defaultToSpeaker' | 'mixWithOthers'
+
+const buildIosCategoryOptions = (isBluetoothMic: boolean) => {
+  const options: IosCategoryOption[] = [
     'allowBluetooth',
     'allowBluetoothA2DP',
-    'defaultToSpeaker',
     'mixWithOthers',
-  ] as ('allowBluetooth' | 'allowBluetoothA2DP' | 'defaultToSpeaker' | 'mixWithOthers')[],
-  mode: 'default' as const,
+  ]
+  // Bluetooth マイク未選択時のみ defaultToSpeaker を含める
+  // Bluetooth マイク選択時は HFP の入出力同期を維持するため除外
+  if (!isBluetoothMic) {
+    options.push('defaultToSpeaker')
+  }
+  return {
+    category: 'playAndRecord' as const,
+    categoryOptions: options,
+    mode: 'default' as const,
+  }
 }
 
 export const useVoiceRecognition = (
@@ -127,7 +135,7 @@ export const useVoiceRecognition = (
 
   const startRecognition = useCallback(async () => {
     try {
-      // Bluetooth マイクルーティングの根本修正（#65）
+      // Bluetooth マイクルーティングの根本修正（#65, #67）
       // expo-speech-recognition は内部で:
       //   1. setCategory + setActive
       //   2. AVAudioEngine() → inputNode が「この時点の」入力をキャプチャ
@@ -138,6 +146,11 @@ export const useVoiceRecognition = (
       // AVAudioEngine 作成時に正しい Bluetooth 入力がキャプチャされる。
       const { preferredInputUID, preferredInputName } =
         useAudioDeviceStore.getState()
+
+      // Bluetooth マイクかどうかを判定（#67）
+      // preferredInputName が存在する場合は Bluetooth デバイス（内蔵マイクは除外済み）
+      const isBluetoothMic = !!preferredInputUID && !!preferredInputName
+
       if (preferredInputUID) {
         await AudioRoute.prepareSessionForRecognition(
           preferredInputUID,
@@ -145,13 +158,17 @@ export const useVoiceRecognition = (
         )
       }
 
+      // iosCategory を動的に構築（#67）
+      // Bluetooth マイク選択時は defaultToSpeaker を除外し、HFP 入出力同期を維持
+      const iosCategory = buildIosCategoryOptions(isBluetoothMic)
+
       ExpoSpeechRecognitionModule.start({
         lang: 'ja-JP',
         interimResults: true,
         continuous: true,
         requiresOnDeviceRecognition: !isOnlineRef.current,
         contextualStrings: [wakeWord, ...Object.values(commands)],
-        iosCategory: IOS_AUDIO_SESSION_OPTIONS,
+        iosCategory,
       })
     } catch (error) {
       console.error('[useVoiceRecognition] startRecognition failed:', error)

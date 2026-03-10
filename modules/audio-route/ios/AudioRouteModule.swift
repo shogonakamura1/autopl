@@ -2,6 +2,52 @@ import ExpoModulesCore
 import AVFoundation
 
 public class AudioRouteModule: Module {
+  // A2DP 出力専用デバイス（Bluetooth スピーカー等）のキャッシュ（#67）
+  // currentRoute.outputs は現在アクティブな出力のみ返すため、
+  // ルート変更時に一度見えた A2DP デバイスを記憶しておく。
+  // iOS には availableOutputs API が存在しないため、この方法でしか
+  // 非アクティブな A2DP デバイスを追跡できない。
+  private static var knownA2DPDevices: [[String: String]] = []
+  private static var routeChangeObserverRegistered = false
+
+  /// ルート変更通知を監視し、A2DP デバイスをキャッシュに追加する
+  private static func registerRouteChangeObserverIfNeeded() {
+    guard !routeChangeObserverRegistered else { return }
+    routeChangeObserverRegistered = true
+
+    NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      Self.updateKnownA2DPDevices()
+    }
+
+    // 初回登録時に現在のルートからもキャッシュ
+    updateKnownA2DPDevices()
+  }
+
+  /// currentRoute.outputs から A2DP デバイスを knownA2DPDevices に追加する
+  /// 既に接続解除されたデバイスは availableInputs にも currentRoute にも現れなくなるが、
+  /// 接続中のデバイスが一時的に currentRoute から外れるケースをカバーする。
+  /// 完全に切断されたデバイスは getAvailableOutputs で接続チェック時に除外される。
+  private static func updateKnownA2DPDevices() {
+    let session = AVAudioSession.sharedInstance()
+    for port in session.currentRoute.outputs {
+      if port.portType == .bluetoothA2DP {
+        let entry: [String: String] = [
+          "uid": port.uid,
+          "name": port.portName,
+          "type": port.portType.rawValue,
+        ]
+        // 名前ベースで重複排除（UID はプロファイル切替で変わるため）
+        if !knownA2DPDevices.contains(where: { $0["name"] == port.portName }) {
+          knownA2DPDevices.append(entry)
+        }
+      }
+    }
+  }
+
   public func definition() -> ModuleDefinition {
     Name("AudioRoute")
 
@@ -30,16 +76,22 @@ public class AudioRouteModule: Module {
       return result
     }
 
-    // 利用可能な出力デバイス一覧を返す
+    // 利用可能な出力デバイス一覧を返す（#67 で改善）
     // 1. currentRoute.outputs から現在アクティブな外部デバイスを列挙
-    // 2. availableInputs から HFP 双方向デバイスを追加（#65）
-    //    HFP デバイスは入出力両対応だが currentRoute.outputs に出ない場合がある
-    //    （例: A2DP で別デバイスが出力中の場合）
-    // 3. 内蔵スピーカーは常に含める
+    // 2. availableInputs から HFP/LE 双方向デバイスを追加
+    // 3. knownA2DPDevices キャッシュから A2DP 出力専用デバイスを追加
+    //    → currentRoute から外れた A2DP デバイスもリストに残る
+    // 4. 内蔵スピーカーは常に含める
     AsyncFunction("getAvailableOutputs") { () -> [[String: String]] in
       let session = AVAudioSession.sharedInstance()
       var outputs: [[String: String]] = []
       var seenUIDs = Set<String>()
+      var seenNames = Set<String>()
+
+      // ルート変更監視を開始（初回のみ）
+      Self.registerRouteChangeObserverIfNeeded()
+      // 現在のルートからも A2DP キャッシュを更新
+      Self.updateKnownA2DPDevices()
 
       // 1. 現在アクティブな出力デバイス
       for port in session.currentRoute.outputs {
@@ -50,6 +102,7 @@ public class AudioRouteModule: Module {
             "type": port.portType.rawValue,
           ])
           seenUIDs.insert(port.uid)
+          seenNames.insert(port.portName)
         }
       }
 
@@ -58,18 +111,31 @@ public class AudioRouteModule: Module {
       if let inputs = session.availableInputs {
         let btInputTypes: [AVAudioSession.Port] = [.bluetoothHFP, .bluetoothLE]
         for port in inputs where btInputTypes.contains(port.portType) {
-          if !seenUIDs.contains(port.uid) {
+          if !seenUIDs.contains(port.uid) && !seenNames.contains(port.portName) {
             outputs.append([
               "uid": port.uid,
               "name": port.portName,
               "type": port.portType.rawValue,
             ])
             seenUIDs.insert(port.uid)
+            seenNames.insert(port.portName)
           }
         }
       }
 
-      // 3. 内蔵スピーカーは常に含める
+      // 3. knownA2DPDevices キャッシュから、まだリストに無い A2DP デバイスを追加（#67）
+      //    currentRoute から外れた A2DP スピーカーもリストに残し続ける
+      for device in Self.knownA2DPDevices {
+        let deviceName = device["name"] ?? ""
+        let deviceUID = device["uid"] ?? ""
+        if !seenUIDs.contains(deviceUID) && !seenNames.contains(deviceName) {
+          outputs.append(device)
+          seenUIDs.insert(deviceUID)
+          seenNames.insert(deviceName)
+        }
+      }
+
+      // 4. 内蔵スピーカーは常に含める
       outputs.append([
         "uid": "builtin_speaker",
         "name": "内蔵スピーカー",
@@ -139,15 +205,35 @@ public class AudioRouteModule: Module {
     //   - setPreferredInput で Bluetooth マイクが設定される
     //   - expo-speech-recognition が同じ category を設定 → no-op（preferredInput 維持）
     //   - AVAudioEngine.inputNode が Bluetooth マイクをキャプチャする
+    //
+    // #67 修正: Bluetooth マイク選択時は .defaultToSpeaker を除外する。
+    // HFP は入出力同期プロトコルであり、.defaultToSpeaker が出力を内蔵スピーカーに
+    // 強制すると iOS が HFP 同期を維持できず setPreferredInput を無視する。
+    // ref: Apple Developer Forums #713197, #730600
     AsyncFunction("prepareSessionForRecognition") { (uid: String?, name: String?) throws in
       let session = AVAudioSession.sharedInstance()
+
+      // Bluetooth マイクが指定されているかチェック
+      let isBluetooth = Self.isBluetoothDevice(uid: uid, name: name, session: session)
+
+      // .defaultToSpeaker は Bluetooth HFP マイクルーティングと競合する（#67）
+      // HFP は入出力が同期されるため、.defaultToSpeaker が出力を内蔵スピーカーに強制すると
+      // iOS が Bluetooth マイクの setPreferredInput を無視してしまう。
+      // Bluetooth マイク選択時は .defaultToSpeaker を除外し、HFP の入出力同期を維持する。
+      // Bluetooth 未選択時は .defaultToSpeaker を含めて、受話器ではなくスピーカーから出力する。
+      var categoryOptions: AVAudioSession.CategoryOptions = [
+        .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers
+      ]
+      if !isBluetooth {
+        categoryOptions.insert(.defaultToSpeaker)
+      }
 
       // expo-speech-recognition と同じカテゴリ・オプションを設定
       // 先に設定しておくことで、expo-speech-recognition 側の setCategory は no-op になる
       try session.setCategory(
         .playAndRecord,
         mode: .default,
-        options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers]
+        options: categoryOptions
       )
       try session.setActive(true, options: .notifyOthersOnDeactivation)
 
@@ -184,5 +270,29 @@ public class AudioRouteModule: Module {
       }
       return ["inputs": inputs, "outputs": outputs]
     }
+  }
+
+  // 指定されたデバイスが Bluetooth デバイスかどうかを判定する（#67）
+  // availableInputs で UID または名前が Bluetooth ポートタイプに一致するかチェック
+  private static func isBluetoothDevice(uid: String?, name: String?, session: AVAudioSession) -> Bool {
+    guard let uid = uid else { return false }
+    guard let inputs = session.availableInputs else { return false }
+
+    let btTypes: [AVAudioSession.Port] = [.bluetoothHFP, .bluetoothLE, .bluetoothA2DP]
+
+    // UID で検索
+    if let port = inputs.first(where: { $0.uid == uid }),
+       btTypes.contains(port.portType) {
+      return true
+    }
+
+    // 名前で検索（プロファイル切替で UID が変わるケース）
+    if let name = name,
+       let port = inputs.first(where: { $0.portName == name }),
+       btTypes.contains(port.portType) {
+      return true
+    }
+
+    return false
   }
 }
