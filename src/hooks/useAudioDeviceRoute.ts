@@ -88,6 +88,17 @@ export const useAudioDeviceRoute = () => {
     return () => subscription.remove()
   }, [refreshDevices])
 
+  // オーディオルート変更時にデバイス一覧を再スキャン（#67）
+  // TrackPlayer の再生開始、Bluetooth デバイスの接続/切断で発火する
+  useEffect(() => {
+    const subscription = AudioRoute.addRouteChangeListener(() => {
+      refreshDevices()
+    })
+    return () => {
+      subscription?.remove()
+    }
+  }, [refreshDevices])
+
   const selectInput = useCallback(
     async (uid: string) => {
       try {

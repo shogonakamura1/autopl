@@ -1,12 +1,24 @@
-import { requireOptionalNativeModule } from 'expo-modules-core'
+import {
+  requireOptionalNativeModule,
+  EventEmitter,
+} from 'expo-modules-core'
 
 // ネイティブモジュールが未ビルドの場合は null になる（prebuild 前の開発時など）
 const AudioRouteNativeModule = requireOptionalNativeModule('AudioRoute')
+
+// イベントエミッター（ルート変更通知の購読用）
+const emitter = AudioRouteNativeModule
+  ? new EventEmitter(AudioRouteNativeModule)
+  : null
 
 export interface AudioPort {
   uid: string
   name: string
   type: string
+}
+
+export interface AudioRouteChangeEvent {
+  reason: string
 }
 
 export const getAvailableInputs = (): Promise<AudioPort[]> =>
@@ -41,3 +53,15 @@ export const getCurrentRoute = (): Promise<{
 }> =>
   AudioRouteNativeModule?.getCurrentRoute() ??
   Promise.resolve({ inputs: [], outputs: [] })
+
+// オーディオルート変更イベントの購読（#67）
+// TrackPlayer の再生開始、Bluetooth デバイスの接続/切断 等で発火する
+export const addRouteChangeListener = (
+  callback: (event: AudioRouteChangeEvent) => void
+): { remove: () => void } | null => {
+  if (!emitter) return null
+  return emitter.addListener(
+    'onAudioRouteChange' as never,
+    callback as never
+  )
+}

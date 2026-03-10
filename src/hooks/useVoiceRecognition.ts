@@ -169,7 +169,12 @@ export const useVoiceRecognition = (
         requiresOnDeviceRecognition: !isOnlineRef.current,
         contextualStrings: [wakeWord, ...Object.values(commands)],
         iosCategory,
-      })
+        // expo-speech-recognition パッチ (#67):
+        // setupAudioSession() と AVAudioEngine() の間で setPreferredInput を呼ぶ
+        // これにより setCategory() が preferredInput をリセットしても再設定される
+        iosPreferredInputUID: preferredInputUID ?? undefined,
+        iosPreferredInputName: preferredInputName ?? undefined,
+      } as Parameters<typeof ExpoSpeechRecognitionModule.start>[0])
     } catch (error) {
       console.error('[useVoiceRecognition] startRecognition failed:', error)
     }
