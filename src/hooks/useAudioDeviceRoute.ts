@@ -27,9 +27,30 @@ export const useAudioDeviceRoute = () => {
         AudioRoute.getAvailableInputs(),
         AudioRoute.getAvailableOutputs(),
       ])
-      _deviceCache = { inputs, outputs }
-      setAvailableInputs(inputs)
-      setAvailableOutputs(outputs)
+
+      // Bluetooth デバイスは入出力両対応のため、両方のピッカーに表示する（#63）
+      // ユーザーがマイクとしてもスピーカーとしても選択できるようにする
+      const bluetoothTypes = ['BluetoothHFP', 'BluetoothA2DPOutput', 'BluetoothLE']
+      const isBluetooth = (device: AudioPort) =>
+        bluetoothTypes.includes(device.type)
+
+      const mergedInputs = [...inputs]
+      for (const device of outputs.filter(isBluetooth)) {
+        if (!mergedInputs.some((d) => d.uid === device.uid)) {
+          mergedInputs.push(device)
+        }
+      }
+
+      const mergedOutputs = [...outputs]
+      for (const device of inputs.filter(isBluetooth)) {
+        if (!mergedOutputs.some((d) => d.uid === device.uid)) {
+          mergedOutputs.push(device)
+        }
+      }
+
+      _deviceCache = { inputs: mergedInputs, outputs: mergedOutputs }
+      setAvailableInputs(mergedInputs)
+      setAvailableOutputs(mergedOutputs)
     } catch (error) {
       console.error('[useAudioDeviceRoute] refreshDevices failed:', error)
     }
@@ -67,13 +88,15 @@ export const useAudioDeviceRoute = () => {
   const selectInput = useCallback(
     async (uid: string) => {
       try {
-        await AudioRoute.setPreferredInput(uid)
-        storeSetPreferredInput(uid)
+        // 選択されたデバイスの名前を取得して保存（プロファイル切替時のフォールバック用）
+        const device = availableInputs.find((d) => d.uid === uid)
+        await AudioRoute.setPreferredInput(uid, device?.name)
+        storeSetPreferredInput(uid, device?.name)
       } catch (error) {
         console.error('[useAudioDeviceRoute] selectInput failed:', error)
       }
     },
-    [storeSetPreferredInput]
+    [storeSetPreferredInput, availableInputs]
   )
 
   const selectOutput = useCallback(
