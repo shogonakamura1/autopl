@@ -4,9 +4,16 @@ import * as AudioRoute from '../../modules/audio-route'
 import type { AudioPort } from '../../modules/audio-route'
 import { useAudioDeviceStore } from '../stores/audioDeviceStore'
 
+// モジュールレベルキャッシュ: 設定画面を開いた際に即座に表示するため
+// アプリ起動中はメモリに保持し、2回目以降の画面表示でラグをなくす
+let _deviceCache: { inputs: AudioPort[]; outputs: AudioPort[] } = {
+  inputs: [],
+  outputs: [],
+}
+
 export const useAudioDeviceRoute = () => {
-  const [availableInputs, setAvailableInputs] = useState<AudioPort[]>([])
-  const [availableOutputs, setAvailableOutputs] = useState<AudioPort[]>([])
+  const [availableInputs, setAvailableInputs] = useState<AudioPort[]>(_deviceCache.inputs)
+  const [availableOutputs, setAvailableOutputs] = useState<AudioPort[]>(_deviceCache.outputs)
 
   const preferredInputUID = useAudioDeviceStore((state) => state.preferredInputUID)
   const preferredOutputUID = useAudioDeviceStore((state) => state.preferredOutputUID)
@@ -20,6 +27,7 @@ export const useAudioDeviceRoute = () => {
         AudioRoute.getAvailableInputs(),
         AudioRoute.getAvailableOutputs(),
       ])
+      _deviceCache = { inputs, outputs }
       setAvailableInputs(inputs)
       setAvailableOutputs(outputs)
     } catch (error) {

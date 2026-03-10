@@ -30,8 +30,6 @@ const IOS_AUDIO_SESSION_OPTIONS = {
   mode: 'default' as const,
 }
 
-type PendingTransition = 'command' | null
-
 export const useVoiceRecognition = (
   onCommandRecognized: (command: VoiceCommand) => void
 ): UseVoiceRecognitionResult => {
@@ -56,7 +54,6 @@ export const useVoiceRecognition = (
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isListeningRef = useRef(false)
   const recognitionStateRef = useRef(recognitionState)
-  const pendingTransitionRef = useRef<PendingTransition>(null)
   const isOnlineRef = useRef(isOnline)
 
   // isOnlineRef を最新値に同期
@@ -65,9 +62,6 @@ export const useVoiceRecognition = (
   }, [isOnline])
 
   // 状態を ref と store の両方に同期的に更新する
-  // useEffect 経由の ref 更新はレンダリング後まで遅延し、
-  // end イベントが古い state を参照するレースコンディションの原因になるため、
-  // 全ての状態変更はこのヘルパーを通す
   const updateState = useCallback(
     (state: VoiceRecognitionState) => {
       recognitionStateRef.current = state
@@ -128,10 +122,27 @@ export const useVoiceRecognition = (
     }
   }, [])
 
+  // 単一の continuous セッションを開始する
+  // wakeword → command の遷移で stop/start を繰り返さないことで
+  // 音楽の途切れを防止する
+  const startRecognition = useCallback(() => {
+    try {
+      ExpoSpeechRecognitionModule.start({
+        lang: 'ja-JP',
+        interimResults: true,
+        continuous: true,
+        requiresOnDeviceRecognition: !isOnlineRef.current,
+        contextualStrings: [wakeWord, ...Object.values(commands)],
+        iosCategory: IOS_AUDIO_SESSION_OPTIONS,
+      })
+    } catch (error) {
+      console.error('[useVoiceRecognition] startRecognition failed:', error)
+    }
+  }, [wakeWord, commands])
+
   // 音声認識を停止
   const stopListening = useCallback(() => {
     clearCommandTimeout()
-    pendingTransitionRef.current = null
     isListeningRef.current = false
     try {
       ExpoSpeechRecognitionModule.stop()
@@ -142,58 +153,12 @@ export const useVoiceRecognition = (
     setLastRecognizedText(null)
   }, [clearCommandTimeout, updateState, setLastRecognizedText])
 
-  // 音声認識を実行する
-  const startRecognition = useCallback(
-    (continuous: boolean) => {
-      try {
-        const startOptions = {
-          lang: 'ja-JP',
-          interimResults: true,
-          continuous,
-          requiresOnDeviceRecognition: !isOnlineRef.current,
-          contextualStrings: [wakeWord, ...Object.values(commands)],
-          // iOS の音声セッション設定を明示的に指定
-          // デフォルトの allowBluetooth（HFP）と measurement モードを上書きし、
-          // A2DP 高音質を維持しつつ再生音量の低下を防ぐ
-          iosCategory: IOS_AUDIO_SESSION_OPTIONS,
-        }
-        ExpoSpeechRecognitionModule.start(startOptions)
-      } catch (error) {
-        console.error('[useVoiceRecognition] startRecognition failed:', error)
-      }
-    },
-    [wakeWord, commands]
-  )
-
-  // ウェイクワード検出用の認識を開始する
-  const startWakeWordRecognition = useCallback(() => {
-    updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
-    startRecognition(true)
-  }, [updateState, startRecognition])
-
-  // コマンド認識を開始する（end イベントから呼ばれる）
-  const startCommandRecognition = useCallback(() => {
-    updateState(VoiceRecognitionState.LISTENING_FOR_COMMAND)
-    clearCommandTimeout()
-
-    // タイムアウト設定
-    timeoutRef.current = setTimeout(() => {
-      updateState(VoiceRecognitionState.IDLE)
-      setLastRecognizedText(null)
-      // ウェイクワード検出に戻る
-      if (isListeningRef.current) {
-        startWakeWordRecognition()
-      }
-    }, timeoutSeconds * 1000)
-
-    startRecognition(false)
-  }, [timeoutSeconds, clearCommandTimeout, updateState, setLastRecognizedText, startWakeWordRecognition, startRecognition])
-
   // ウェイクワード監視を開始（外部API）
   const startWakeWordListening = useCallback(() => {
     isListeningRef.current = true
-    startWakeWordRecognition()
-  }, [startWakeWordRecognition])
+    updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
+    startRecognition()
+  }, [updateState, startRecognition])
 
   // 音声認識イベントリスナー
   useEffect(() => {
@@ -209,25 +174,38 @@ export const useVoiceRecognition = (
           recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
         ) {
           if (containsWakeWord(transcript)) {
-            // ウェイクワード検出 → 認識を停止し、end イベントでコマンド認識に遷移
-            // stop() の前に遷移予約することで、end イベントが正しくコマンド認識を開始する
-            pendingTransitionRef.current = 'command'
-            ExpoSpeechRecognitionModule.stop()
+            // ウェイクワード検出 → セッションを止めずに状態だけ変更
+            // stop/start しないことで音楽の途切れを防止する
+            updateState(VoiceRecognitionState.LISTENING_FOR_COMMAND)
+
+            // コマンドタイムアウトを設定
+            clearCommandTimeout()
+            timeoutRef.current = setTimeout(() => {
+              if (
+                isListeningRef.current &&
+                recognitionStateRef.current ===
+                  VoiceRecognitionState.LISTENING_FOR_COMMAND
+              ) {
+                updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
+                setLastRecognizedText(null)
+              }
+            }, timeoutSeconds * 1000)
           }
         } else if (
           recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_COMMAND
         ) {
           const command = matchCommand(transcript)
-          if (command && event.isFinal) {
+          if (command) {
+            // コマンド検出 → 中間結果でも即座に実行（isFinal 待ち不要）
             clearCommandTimeout()
-            ExpoSpeechRecognitionModule.stop()
             updateState(VoiceRecognitionState.PROCESSING)
             onCommandRecognized(command)
 
-            // コマンド実行後、ウェイクワード検出に戻る
+            // フィードバック音の後にウェイクワード待機に戻る
             setTimeout(() => {
               if (isListeningRef.current) {
-                startWakeWordRecognition()
+                updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
+                setLastRecognizedText(null)
               }
             }, 500)
           }
@@ -240,7 +218,6 @@ export const useVoiceRecognition = (
       (event) => {
         if (event.error === 'no-speech' || event.error === 'speech-timeout') {
           // no-speech / speech-timeout はウェイクワード待機中の正常な挙動
-          // end イベントが後に発火するのでここではリトライしない（二重起動防止）
           console.warn('[useVoiceRecognition] expected timeout:', event.error)
         } else {
           console.error('[useVoiceRecognition] recognition error:', event.error)
@@ -251,28 +228,19 @@ export const useVoiceRecognition = (
     const endSubscription = ExpoSpeechRecognitionModule.addListener(
       'end',
       () => {
-        // 全ての認識再開はここで一元管理する（二重起動を防止）
-        const transition = pendingTransitionRef.current
-        pendingTransitionRef.current = null
+        if (!isListeningRef.current) return
 
-        if (transition === 'command') {
-          // ウェイクワード検出後 → コマンド認識を開始
-          // stop() の完了を待ってから start() するので iOS の認識セッション競合を回避
-          startCommandRecognition()
-          return
-        }
-
-        // ウェイクワード待機中の自動再開（タイムアウト後など）
-        if (
-          isListeningRef.current &&
-          recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
-        ) {
-          setTimeout(() => {
-            if (isListeningRef.current) {
-              startWakeWordRecognition()
-            }
-          }, 300)
-        }
+        // セッションが自然終了（iOS 制限 / タイムアウト）→ 再開
+        // PROCESSING 中（コマンド実行直後の 500ms）は再開しない
+        setTimeout(() => {
+          if (
+            isListeningRef.current &&
+            recognitionStateRef.current !== VoiceRecognitionState.PROCESSING
+          ) {
+            updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
+            startRecognition()
+          }
+        }, 300)
       }
     )
 
@@ -284,19 +252,18 @@ export const useVoiceRecognition = (
   }, [ // eslint-disable-line react-hooks/exhaustive-deps
     containsWakeWord,
     matchCommand,
-    startCommandRecognition,
-    startWakeWordRecognition,
     clearCommandTimeout,
     updateState,
     setLastRecognizedText,
     onCommandRecognized,
+    startRecognition,
+    timeoutSeconds,
   ])
 
   // クリーンアップ
   useEffect(() => {
     return () => {
       clearCommandTimeout()
-      pendingTransitionRef.current = null
       isListeningRef.current = false
       try {
         ExpoSpeechRecognitionModule.stop()
