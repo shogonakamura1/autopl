@@ -16,7 +16,7 @@ public class AudioRouteModule: Module {
       if let inputs = session.availableInputs {
         // 開発用: 内蔵マイク (builtInMicrophone) を除外
         result = inputs
-          .filter { $0.portType != .builtInMicrophone }
+          .filter { $0.portType != .builtInMic }
           .map { port in
             [
               "uid": port.uid,
