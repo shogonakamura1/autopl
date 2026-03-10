@@ -6,32 +6,36 @@ public class AudioRouteModule: Module {
     Name("AudioRoute")
 
     // 接続済み入力デバイス（マイク）一覧を返す
-    // Bluetoothデバイスを列挙するために一時的に .allowBluetooth を付与してから元に戻す
+    // setCategory は呼ばない（音楽再生を中断させないため）
+    // A2DP 接続中の Bluetooth デバイスは currentRoute.outputs から補完する
     AsyncFunction("getAvailableInputs") { () -> [[String: String]] in
       let session = AVAudioSession.sharedInstance()
-      let originalOptions = session.categoryOptions
+      var result: [[String: String]] = []
 
-      // .allowBluetooth がない場合は一時付与（BluetoothマイクがavailableInputsに出ない対策）
-      if !originalOptions.contains(.allowBluetooth) {
-        try? session.setCategory(session.category, mode: session.mode,
-                                  options: originalOptions.union(.allowBluetooth))
+      if let inputs = session.availableInputs {
+        result = inputs.map { port in
+          [
+            "uid": port.uid,
+            "name": port.portName,
+            "type": port.portType.rawValue,
+          ]
+        }
       }
 
-      let inputs = session.availableInputs ?? []
-
-      // 元のオプションに戻す
-      if !originalOptions.contains(.allowBluetooth) {
-        try? session.setCategory(session.category, mode: session.mode,
-                                  options: originalOptions)
+      // A2DP 接続中の Bluetooth デバイスが availableInputs に出ない場合でも
+      // マイク候補として追加する（allowBluetooth 未設定時の補完）
+      let btOutputTypes: [AVAudioSession.Port] = [.bluetoothA2DP, .bluetoothLE]
+      for port in session.currentRoute.outputs where btOutputTypes.contains(port.portType) {
+        if !result.contains(where: { $0["uid"] == port.uid }) {
+          result.append([
+            "uid": port.uid,
+            "name": port.portName,
+            "type": AVAudioSession.Port.bluetoothHFP.rawValue,
+          ])
+        }
       }
 
-      return inputs.map { port in
-        [
-          "uid": port.uid,
-          "name": port.portName,
-          "type": port.portType.rawValue,
-        ]
-      }
+      return result
     }
 
     // 利用可能な出力デバイス一覧を返す
@@ -62,6 +66,7 @@ public class AudioRouteModule: Module {
     }
 
     // 優先する入力デバイス（マイク）を設定する。nil で自動に戻す。
+    // Bluetooth マイクの場合、availableInputs に出るよう allowBluetooth を付与する
     AsyncFunction("setPreferredInput") { (uid: String?) throws in
       let session = AVAudioSession.sharedInstance()
 
@@ -70,14 +75,39 @@ public class AudioRouteModule: Module {
         return
       }
 
-      guard let inputs = session.availableInputs,
-            let port = inputs.first(where: { $0.uid == uid }) else {
-        // 指定ポートが見つからない場合は自動に戻す（エラーにしない）
-        try session.setPreferredInput(nil)
+      // 通常の入力から探す
+      if let inputs = session.availableInputs,
+         let port = inputs.first(where: { $0.uid == uid }) {
+        try session.setPreferredInput(port)
         return
       }
 
-      try session.setPreferredInput(port)
+      // 見つからない場合は Bluetooth デバイスの可能性
+      // allowBluetooth を付与して再探索する
+      let originalOptions = session.categoryOptions
+      if !originalOptions.contains(.allowBluetooth) {
+        try? session.setCategory(
+          session.category,
+          mode: session.mode,
+          options: originalOptions.union(.allowBluetooth)
+        )
+      }
+
+      if let inputs = session.availableInputs,
+         let port = inputs.first(where: { $0.uid == uid }) {
+        // allowBluetooth は維持する（HFP マイクに必要）
+        try session.setPreferredInput(port)
+      } else {
+        // それでも見つからない場合は元のオプションに戻して自動入力
+        if !originalOptions.contains(.allowBluetooth) {
+          try? session.setCategory(
+            session.category,
+            mode: session.mode,
+            options: originalOptions
+          )
+        }
+        try session.setPreferredInput(nil)
+      }
     }
 
     // 優先する出力デバイスを設定する。
