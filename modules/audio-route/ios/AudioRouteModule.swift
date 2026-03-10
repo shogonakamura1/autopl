@@ -6,10 +6,25 @@ public class AudioRouteModule: Module {
     Name("AudioRoute")
 
     // 接続済み入力デバイス（マイク）一覧を返す
+    // Bluetoothデバイスを列挙するために一時的に .allowBluetooth を付与してから元に戻す
     AsyncFunction("getAvailableInputs") { () -> [[String: String]] in
-      guard let inputs = AVAudioSession.sharedInstance().availableInputs else {
-        return []
+      let session = AVAudioSession.sharedInstance()
+      let originalOptions = session.categoryOptions
+
+      // .allowBluetooth がない場合は一時付与（BluetoothマイクがavailableInputsに出ない対策）
+      if !originalOptions.contains(.allowBluetooth) {
+        try? session.setCategory(session.category, mode: session.mode,
+                                  options: originalOptions.union(.allowBluetooth))
       }
+
+      let inputs = session.availableInputs ?? []
+
+      // 元のオプションに戻す
+      if !originalOptions.contains(.allowBluetooth) {
+        try? session.setCategory(session.category, mode: session.mode,
+                                  options: originalOptions)
+      }
+
       return inputs.map { port in
         [
           "uid": port.uid,

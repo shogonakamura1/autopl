@@ -1,10 +1,10 @@
 import React, { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Menu, Text, TouchableRipple, useTheme } from 'react-native-paper'
+import { Icon, Menu, Text, TouchableRipple, useTheme } from 'react-native-paper'
 import type { AudioPort } from '../../../modules/audio-route'
 
 interface Props {
-  icon: string
+  iconName: string
   selectedUID: string | null
   devices: AudioPort[]
   onSelect: (uid: string) => void
@@ -12,7 +12,7 @@ interface Props {
 }
 
 export const AudioDevicePicker: React.FC<Props> = ({
-  icon,
+  iconName,
   selectedUID,
   devices,
   onSelect,
@@ -33,7 +33,7 @@ export const AudioDevicePicker: React.FC<Props> = ({
         <TouchableRipple
           onPress={() => setMenuVisible(true)}
           style={[
-            styles.picker,
+            styles.pill,
             {
               borderColor: colors.outline,
               backgroundColor: colors.surfaceVariant,
@@ -42,17 +42,17 @@ export const AudioDevicePicker: React.FC<Props> = ({
           accessibilityLabel={accessibilityLabel}
           borderless={false}
         >
-          <View style={styles.pickerContent}>
+          <View style={styles.pillContent}>
+            <Icon source={iconName} size={14} color={colors.onSurfaceVariant} />
             <Text
-              variant="bodyMedium"
+              variant="bodySmall"
               style={[styles.deviceName, { color: colors.onSurface }]}
               numberOfLines={1}
+              ellipsizeMode="tail"
             >
-              {icon} {selectedDevice?.name ?? '—'}
+              {selectedDevice?.name ?? '—'}
             </Text>
-            <Text variant="bodyMedium" style={{ color: colors.onSurfaceVariant }}>
-              ▼
-            </Text>
+            <Icon source="chevron-down" size={14} color={colors.onSurfaceVariant} />
           </View>
         </TouchableRipple>
       }
@@ -75,18 +75,18 @@ export const AudioDevicePicker: React.FC<Props> = ({
 }
 
 const styles = StyleSheet.create({
-  picker: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+  pill: {
     flex: 1,
+    borderWidth: 1.5,
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    overflow: 'hidden',
   },
-  pickerContent: {
+  pillContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   deviceName: {
     flex: 1,
