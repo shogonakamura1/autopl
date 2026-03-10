@@ -31,6 +31,7 @@ export const audioService = {
         iosCategoryOptions: [
           IOSCategoryOptions.AllowBluetoothA2DP,
           IOSCategoryOptions.DefaultToSpeaker,
+          IOSCategoryOptions.MixWithOthers,
         ],
       })
       await TrackPlayer.updateOptions({
