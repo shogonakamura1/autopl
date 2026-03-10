@@ -1,6 +1,7 @@
 {
-  "platforms": ["ios"],
-  "ios": {
-    "modules": ["AudioRouteModule"]
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["AudioRouteModule"],
+    "podspecPath": "ios/AudioRoute.podspec"
   }
 }

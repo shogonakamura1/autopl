@@ -15,6 +15,10 @@ expo-env.d.ts
 ios/
 android/
 
+# Allow local native modules' ios/ directories
+!modules/*/ios/
+!modules/*/ios/**
+
 # Environment variables
 .env
 .env.local
