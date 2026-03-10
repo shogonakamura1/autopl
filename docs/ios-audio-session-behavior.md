@@ -216,8 +216,28 @@ AI がオーディオ関連のバグを修正する際、推測ではなくこ�
 ### 対策（現在の実装）
 
 - `AVAudioSession.routeChangeNotification` を監視し、A2DP デバイスをモジュールレベルでキャッシュ（#67）
+- デバイス切断時（`oldDeviceUnavailable`）はキャッシュから該当デバイスを削除
 - `getAvailableOutputs` でキャッシュされた A2DP デバイスも含めて返す
 - TS 層では A2DP デバイスをスピーカーピッカーのみに表示（マイク非対応のため入力ピッカーには含めない）
+- ルート変更イベントを JS 層に `onAudioRouteChange` として発行し、デバイスリストを自動更新
+
+---
+
+## 13. expo-speech-recognition の setCategory() が preferredInput をリセットする問題
+
+### 確認済みの事実
+
+- `expo-speech-recognition` の `prepareMicrophoneRecognition()` は内部で `setupAudioSession()` → `AVAudioEngine()` を連続実行
+- `setupAudioSession()` 内の `setCategory()` は、同一パラメータであっても `preferredInput` をリセットする可能性がある（iOS 16+ で確認）
+- `prepareSessionForRecognition` で事前に `setPreferredInput` を設定しても、ライブラリの `setCategory()` でリセットされる
+- 結果として `AVAudioEngine.inputNode` は内蔵マイクをキャプチャしてしまう
+
+### 対策（現在の実装）
+
+- `expo-speech-recognition` を `patch-package` でパッチし、`setupAudioSession()` と `AVAudioEngine()` の間で `setPreferredInput` を再適用（#67）
+- `SpeechRecognitionOptions` に `iosPreferredInputUID` / `iosPreferredInputName` フィールドを追加
+- `restartAudioEngineForRouteChange()` でも同様に `setPreferredInput` を再適用
+- JS 側から `ExpoSpeechRecognitionModule.start()` に新フィールドを渡す
 
 ---
 

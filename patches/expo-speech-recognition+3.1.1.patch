@@ -1,0 +1,69 @@
+diff --git a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
+index 282f1c9..c9f69fd 100644
+--- a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
++++ b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
+@@ -335,6 +335,24 @@ actor ExpoSpeechRecognizer: ObservableObject {
+     options: SpeechRecognitionOptions
+   ) throws {
+     try Self.setupAudioSession(options.iosCategory)
++
++    // autopl パッチ (#67): setupAudioSession() と AVAudioEngine() の間で
++    // setPreferredInput を呼ぶ。これにより AVAudioEngine.inputNode が
++    // 正しい Bluetooth マイクをキャプチャする。
++    // setupAudioSession() の setCategory() が preferredInput をリセットする
++    // 可能性があるため、ここで再設定する必要がある。
++    if let preferredUID = options.iosPreferredInputUID {
++      let session = AVAudioSession.sharedInstance()
++      if let inputs = session.availableInputs {
++        if let port = inputs.first(where: { $0.uid == preferredUID }) {
++          try session.setPreferredInput(port)
++        } else if let preferredName = options.iosPreferredInputName,
++                  let port = inputs.first(where: { $0.portName == preferredName }) {
++          try session.setPreferredInput(port)
++        }
++      }
++    }
++
+     registerAudioSessionObservers()
+     self.audioEngine = AVAudioEngine()
+ 
+@@ -779,6 +797,19 @@ actor ExpoSpeechRecognizer: ObservableObject {
+       oldEngine.reset()
+     }
+ 
++    // autopl パッチ (#67): ルート変更後のエンジン再作成でも setPreferredInput を再適用
++    if let preferredUID = options.iosPreferredInputUID {
++      let session = AVAudioSession.sharedInstance()
++      if let inputs = session.availableInputs {
++        if let port = inputs.first(where: { $0.uid == preferredUID }) {
++          try? session.setPreferredInput(port)
++        } else if let preferredName = options.iosPreferredInputName,
++                  let port = inputs.first(where: { $0.portName == preferredName }) {
++          try? session.setPreferredInput(port)
++        }
++      }
++    }
++
+     let newEngine = AVAudioEngine()
+     let inputNode = newEngine.inputNode
+     let audioFormat = Self.getAudioFormat(forEngine: newEngine)
+diff --git a/node_modules/expo-speech-recognition/ios/SpeechRecognitionOptions.swift b/node_modules/expo-speech-recognition/ios/SpeechRecognitionOptions.swift
+index d38a050..5b16d85 100644
+--- a/node_modules/expo-speech-recognition/ios/SpeechRecognitionOptions.swift
++++ b/node_modules/expo-speech-recognition/ios/SpeechRecognitionOptions.swift
+@@ -40,6 +40,15 @@ struct SpeechRecognitionOptions: Record {
+ 
+   @Field
+   var iosVoiceProcessingEnabled: Bool? = false
++
++  // Bluetooth マイク選択用（autopl パッチ #67）
++  // expo-speech-recognition の setupAudioSession() と AVAudioEngine() の間で
++  // setPreferredInput を呼ぶために使用する
++  @Field
++  var iosPreferredInputUID: String? = nil
++
++  @Field
++  var iosPreferredInputName: String? = nil
+ }
+ 
+ struct VolumeChangeEventOptions: Record {

@@ -9,8 +9,11 @@ public class AudioRouteModule: Module {
   // 非アクティブな A2DP デバイスを追跡できない。
   private static var knownA2DPDevices: [[String: String]] = []
   private static var routeChangeObserverRegistered = false
+  // イベント送信用のモジュールインスタンス参照
+  private static weak var moduleInstance: AudioRouteModule?
 
   /// ルート変更通知を監視し、A2DP デバイスをキャッシュに追加する
+  /// またルート変更イベントを JS 層に発行する（#67）
   private static func registerRouteChangeObserverIfNeeded() {
     guard !routeChangeObserverRegistered else { return }
     routeChangeObserverRegistered = true
@@ -19,8 +22,26 @@ public class AudioRouteModule: Module {
       forName: AVAudioSession.routeChangeNotification,
       object: nil,
       queue: .main
-    ) { _ in
+    ) { notification in
+      let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+      let reasonEnum = AVAudioSession.RouteChangeReason(rawValue: reason ?? 0)
+
+      // デバイス切断時は A2DP キャッシュから該当デバイスを削除
+      if reasonEnum == .oldDeviceUnavailable {
+        if let previousRoute = notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription {
+          for port in previousRoute.outputs where port.portType == .bluetoothA2DP {
+            Self.knownA2DPDevices.removeAll { $0["name"] == port.portName }
+          }
+        }
+      }
+
       Self.updateKnownA2DPDevices()
+
+      // JS 層にルート変更イベントを発行
+      // useAudioDeviceRoute がこれを受けてデバイスリストを再取得する
+      Self.moduleInstance?.sendEvent("onAudioRouteChange", [
+        "reason": Self.routeChangeReasonString(reasonEnum),
+      ])
     }
 
     // 初回登録時に現在のルートからもキャッシュ
@@ -28,9 +49,6 @@ public class AudioRouteModule: Module {
   }
 
   /// currentRoute.outputs から A2DP デバイスを knownA2DPDevices に追加する
-  /// 既に接続解除されたデバイスは availableInputs にも currentRoute にも現れなくなるが、
-  /// 接続中のデバイスが一時的に currentRoute から外れるケースをカバーする。
-  /// 完全に切断されたデバイスは getAvailableOutputs で接続チェック時に除外される。
   private static func updateKnownA2DPDevices() {
     let session = AVAudioSession.sharedInstance()
     for port in session.currentRoute.outputs {
@@ -48,8 +66,28 @@ public class AudioRouteModule: Module {
     }
   }
 
+  /// RouteChangeReason を文字列に変換
+  private static func routeChangeReasonString(_ reason: AVAudioSession.RouteChangeReason?) -> String {
+    switch reason {
+    case .newDeviceAvailable: return "newDeviceAvailable"
+    case .oldDeviceUnavailable: return "oldDeviceUnavailable"
+    case .categoryChange: return "categoryChange"
+    case .override: return "override"
+    case .routeConfigurationChange: return "routeConfigurationChange"
+    default: return "unknown"
+    }
+  }
+
   public func definition() -> ModuleDefinition {
     Name("AudioRoute")
+
+    // モジュールインスタンスを保持（イベント送信用）
+    OnCreate {
+      Self.moduleInstance = self
+    }
+
+    // JS 層に発行するイベント定義（#67）
+    Events("onAudioRouteChange")
 
     // 接続済み入力デバイス（マイク）一覧を返す
     // 開発用: 内蔵マイクは除外し外部デバイスのみ返す
@@ -210,6 +248,10 @@ public class AudioRouteModule: Module {
     // HFP は入出力同期プロトコルであり、.defaultToSpeaker が出力を内蔵スピーカーに
     // 強制すると iOS が HFP 同期を維持できず setPreferredInput を無視する。
     // ref: Apple Developer Forums #713197, #730600
+    //
+    // 追加で expo-speech-recognition のパッチにより、ライブラリ内部でも
+    // setupAudioSession() と AVAudioEngine() の間で setPreferredInput が呼ばれる。
+    // この関数は事前準備として category 設定と preferredInput を先に適用しておく。
     AsyncFunction("prepareSessionForRecognition") { (uid: String?, name: String?) throws in
       let session = AVAudioSession.sharedInstance()
 
@@ -217,10 +259,6 @@ public class AudioRouteModule: Module {
       let isBluetooth = Self.isBluetoothDevice(uid: uid, name: name, session: session)
 
       // .defaultToSpeaker は Bluetooth HFP マイクルーティングと競合する（#67）
-      // HFP は入出力が同期されるため、.defaultToSpeaker が出力を内蔵スピーカーに強制すると
-      // iOS が Bluetooth マイクの setPreferredInput を無視してしまう。
-      // Bluetooth マイク選択時は .defaultToSpeaker を除外し、HFP の入出力同期を維持する。
-      // Bluetooth 未選択時は .defaultToSpeaker を含めて、受話器ではなくスピーカーから出力する。
       var categoryOptions: AVAudioSession.CategoryOptions = [
         .allowBluetooth, .allowBluetoothA2DP, .mixWithOthers
       ]
@@ -228,8 +266,6 @@ public class AudioRouteModule: Module {
         categoryOptions.insert(.defaultToSpeaker)
       }
 
-      // expo-speech-recognition と同じカテゴリ・オプションを設定
-      // 先に設定しておくことで、expo-speech-recognition 側の setCategory は no-op になる
       try session.setCategory(
         .playAndRecord,
         mode: .default,
@@ -238,7 +274,6 @@ public class AudioRouteModule: Module {
       try session.setActive(true, options: .notifyOthersOnDeactivation)
 
       // allowBluetooth が有効な状態で setPreferredInput を実行
-      // この時点で availableInputs に Bluetooth デバイスが含まれている
       guard let uid = uid else { return }
       guard let inputs = session.availableInputs else { return }
 
@@ -273,20 +308,17 @@ public class AudioRouteModule: Module {
   }
 
   // 指定されたデバイスが Bluetooth デバイスかどうかを判定する（#67）
-  // availableInputs で UID または名前が Bluetooth ポートタイプに一致するかチェック
   private static func isBluetoothDevice(uid: String?, name: String?, session: AVAudioSession) -> Bool {
     guard let uid = uid else { return false }
     guard let inputs = session.availableInputs else { return false }
 
     let btTypes: [AVAudioSession.Port] = [.bluetoothHFP, .bluetoothLE, .bluetoothA2DP]
 
-    // UID で検索
     if let port = inputs.first(where: { $0.uid == uid }),
        btTypes.contains(port.portType) {
       return true
     }
 
-    // 名前で検索（プロファイル切替で UID が変わるケース）
     if let name = name,
        let port = inputs.first(where: { $0.portName == name }),
        btTypes.contains(port.portType) {
