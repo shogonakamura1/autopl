@@ -46,9 +46,12 @@ export const useAudioDeviceRoute = () => {
     }
   }, [preferredInputUID, preferredOutputUID])
 
+  // マウント時はデバイス一覧の取得のみ行う
+  // applyPreferences はユーザーがデバイスを変更したとき
+  // または音声認識の start イベントで適用される
+  // 設定画面を開くだけで setCategory が走り音楽が途切れるのを防ぐ
   useEffect(() => {
     refreshDevices()
-    applyPreferences()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // フォアグラウンド復帰時にデバイス一覧を再スキャン

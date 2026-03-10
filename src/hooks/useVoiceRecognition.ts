@@ -120,8 +120,6 @@ export const useVoiceRecognition = (
     }
   }, [])
 
-  // 単一の continuous セッションを開始する
-  // wakeword → command の遷移で stop/start を繰り返さないことで音楽の途切れを防止する
   const startRecognition = useCallback(() => {
     try {
       ExpoSpeechRecognitionModule.start({
@@ -158,23 +156,39 @@ export const useVoiceRecognition = (
   useEffect(() => {
     // セッション開始イベント:
     // expo-speech-recognition が setCategory + setActive を完了したタイミングで
-    // preferredInput を適用する。この時点では allowBluetooth が有効になっているため
-    // Bluetooth マイクが availableInputs に現れ、setPreferredInput が成功する
+    // preferredInput を適用する。allowBluetooth が有効な状態で呼ぶため
+    // Bluetooth マイクが availableInputs に含まれ setPreferredInput が成功する
     const startSubscription = ExpoSpeechRecognitionModule.addListener(
       'start',
-      () => {
+      async () => {
         isSessionActiveRef.current = true
-        const { preferredInputUID } = useAudioDeviceStore.getState()
-        AudioRoute.setPreferredInput(preferredInputUID).catch((err) => {
+
+        try {
+          const { preferredInputUID } = useAudioDeviceStore.getState()
+          if (preferredInputUID) {
+            await AudioRoute.setPreferredInput(preferredInputUID)
+          } else {
+            // 明示的に選択されていない場合は最初の利用可能デバイスを自動選択
+            // （開発用: 内蔵マイクはフィルタ済みなので外部デバイスが優先される）
+            const inputs = await AudioRoute.getAvailableInputs()
+            if (inputs.length > 0) {
+              await AudioRoute.setPreferredInput(inputs[0].uid)
+            }
+          }
+        } catch (err) {
           console.error('[useVoiceRecognition] setPreferredInput failed:', err)
-        })
+        }
       }
     )
 
     const resultSubscription = ExpoSpeechRecognitionModule.addListener(
       'result',
       (event) => {
-        const transcript = event.results[0]?.transcript ?? ''
+        // continuous モードでは results 配列にセグメントが蓄積される
+        // results[0] は最初のセグメント（ウェイクワード）のまま固定されるため、
+        // 最新のセグメント（末尾）を読む必要がある
+        const lastResult = event.results[event.results.length - 1]
+        const transcript = lastResult?.transcript ?? ''
         if (!transcript) return
 
         setLastRecognizedText(transcript)
@@ -183,8 +197,6 @@ export const useVoiceRecognition = (
           recognitionStateRef.current === VoiceRecognitionState.LISTENING_FOR_WAKEWORD
         ) {
           if (containsWakeWord(transcript)) {
-            // ウェイクワード検出 → セッションを止めずに状態だけ変更
-            // stop/start しないことで音楽の途切れを防止する
             updateState(VoiceRecognitionState.LISTENING_FOR_COMMAND)
 
             clearCommandTimeout()
@@ -204,13 +216,10 @@ export const useVoiceRecognition = (
         ) {
           const command = matchCommand(transcript)
           if (command) {
-            // コマンド検出 → 中間結果でも即座に実行（isFinal 待ち不要）
             clearCommandTimeout()
             updateState(VoiceRecognitionState.PROCESSING)
             onCommandRecognized(command)
 
-            // フィードバック音の後にウェイクワード待機に戻る
-            // セッションが PROCESSING 中に終了していた場合は再開する
             setTimeout(() => {
               if (isListeningRef.current) {
                 updateState(VoiceRecognitionState.LISTENING_FOR_WAKEWORD)
@@ -229,7 +238,6 @@ export const useVoiceRecognition = (
       'error',
       (event) => {
         if (event.error === 'no-speech' || event.error === 'speech-timeout') {
-          // no-speech / speech-timeout はウェイクワード待機中の正常な挙動
           console.warn('[useVoiceRecognition] expected timeout:', event.error)
         } else {
           console.error('[useVoiceRecognition] recognition error:', event.error)
@@ -244,10 +252,6 @@ export const useVoiceRecognition = (
 
         if (!isListeningRef.current) return
 
-        // セッションが自然終了（iOS 制限 / タイムアウト）→ 再開
-        // 状態はリセットしない: LISTENING_FOR_COMMAND 中に end が来ても
-        // コマンド待機を継続するため、現在の状態のままセッションを再起動する
-        // PROCESSING 中（コマンド実行直後の 500ms）は 500ms コールバックが再開を担う
         setTimeout(() => {
           if (
             isListeningRef.current &&
