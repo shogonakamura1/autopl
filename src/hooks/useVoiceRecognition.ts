@@ -125,8 +125,26 @@ export const useVoiceRecognition = (
     }
   }, [])
 
-  const startRecognition = useCallback(() => {
+  const startRecognition = useCallback(async () => {
     try {
+      // Bluetooth マイクルーティングの根本修正（#65）
+      // expo-speech-recognition は内部で:
+      //   1. setCategory + setActive
+      //   2. AVAudioEngine() → inputNode が「この時点の」入力をキャプチャ
+      //   3. engine.start()
+      //   4. startHandler() 発火
+      // のため、start() 前に audio session を設定して preferred input を適用する必要がある。
+      // 同じ category を先に設定しておくと expo-speech-recognition 側は no-op になり、
+      // AVAudioEngine 作成時に正しい Bluetooth 入力がキャプチャされる。
+      const { preferredInputUID, preferredInputName } =
+        useAudioDeviceStore.getState()
+      if (preferredInputUID) {
+        await AudioRoute.prepareSessionForRecognition(
+          preferredInputUID,
+          preferredInputName
+        )
+      }
+
       ExpoSpeechRecognitionModule.start({
         lang: 'ja-JP',
         interimResults: true,
@@ -159,15 +177,11 @@ export const useVoiceRecognition = (
   }, [updateState, startRecognition])
 
   useEffect(() => {
-    // セッション開始イベント:
-    // expo-speech-recognition が setCategory + setActive を完了したタイミングで
-    // preferredInput を適用する。allowBluetooth が有効な状態で呼ぶため
-    // Bluetooth マイクが availableInputs に含まれ setPreferredInput が成功する
-    // セッション開始イベント:
-    // expo-speech-recognition が setCategory(.playAndRecord, .allowBluetooth) + setActive を
-    // 完了したタイミング。このタイミングで初めて Bluetooth マイクが availableInputs に出現するため、
-    // setPreferredInput をここで適用する。
-    // UID 不一致時（プロファイル切替で UID が変わった場合）は名前でフォールバックする（#63）
+    // セッション開始イベント（#65 で役割変更）:
+    // prepareSessionForRecognition で既に preferred input を設定済みだが、
+    // バックアップとして start 後にも setPreferredInput を呼ぶ。
+    // また、allowBluetooth が有効な状態で availableInputs を確認し、
+    // ストアの UID が古い場合（プロファイル切替等）に最新 UID に更新する。
     const startSubscription = ExpoSpeechRecognitionModule.addListener(
       'start',
       async () => {
@@ -177,15 +191,29 @@ export const useVoiceRecognition = (
           const { preferredInputUID, preferredInputName } =
             useAudioDeviceStore.getState()
           if (preferredInputUID) {
-            // UID + 名前を渡す。ネイティブ側で UID 一致を試行し、
-            // 失敗時は名前でフォールバック検索する
+            // バックアップ: start 後にも setPreferredInput を適用
+            // prepareSessionForRecognition が成功していれば既に設定済みだが、
+            // 何らかの理由で失敗した場合のフォールバック
             await AudioRoute.setPreferredInput(
               preferredInputUID,
               preferredInputName
             )
+
+            // allowBluetooth 有効状態で最新の availableInputs を確認し、
+            // ストアの UID を最新に更新（名前マッチで見つかった場合）
+            if (preferredInputName) {
+              const freshInputs = await AudioRoute.getAvailableInputs()
+              const matchByName = freshInputs.find(
+                (d) => d.name === preferredInputName
+              )
+              if (matchByName && matchByName.uid !== preferredInputUID) {
+                useAudioDeviceStore
+                  .getState()
+                  .setPreferredInput(matchByName.uid, matchByName.name)
+              }
+            }
           } else {
             // 明示的に選択されていない場合は最初の利用可能デバイスを自動選択
-            // （開発用: 内蔵マイクはフィルタ済みなので外部デバイスが優先される）
             const inputs = await AudioRoute.getAvailableInputs()
             if (inputs.length > 0) {
               await AudioRoute.setPreferredInput(inputs[0].uid, inputs[0].name)

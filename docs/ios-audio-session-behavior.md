@@ -146,6 +146,45 @@ AI がオーディオ関連のバグを修正する際、推測ではなくこ�
 
 ---
 
+## 9. expo-speech-recognition の AVAudioEngine 入力キャプチャタイミング
+
+### 確認済みの事実
+
+- `expo-speech-recognition` の `start()` 内部フロー:
+  1. `setupAudioSession()` → `setCategory` + `setActive`
+  2. `AVAudioEngine()` 作成 → `inputNode` が**この時点の**入力デバイスをキャプチャ
+  3. `prepareEngine()` → `engine.prepare()` + `engine.start()`
+  4. `startHandler()` 発火（= `start` イベント）
+- `start` イベント後に `setPreferredInput` を呼んでも、`AVAudioEngine.inputNode` は既に作成済みなので**マイクルーティングに反映されない**（#65 で判明）
+- `setPreferredInput` を `start()` の**前**に呼ぶ必要がある
+- ただし、`allowBluetooth` 未設定の状態では Bluetooth デバイスが `availableInputs` に含まれない（セクション3参照）
+- **解決策**: `start()` の前に同じカテゴリ（`playAndRecord` + `allowBluetooth`）で `setCategory` + `setActive` + `setPreferredInput` を呼ぶ。expo-speech-recognition 側の `setCategory` は同一設定なら no-op になり、`preferredInput` が維持される
+
+### 対策（現在の実装）
+
+- `AudioRouteModule.swift` に `prepareSessionForRecognition` を追加（#65）
+- `useVoiceRecognition` の `startRecognition` で `ExpoSpeechRecognitionModule.start()` の前に `prepareSessionForRecognition` を呼ぶ
+- `start` イベントリスナーはバックアップとして残す（`prepareSessionForRecognition` が何らかの理由で失敗した場合のフォールバック）
+
+---
+
+## 10. iOS の availableOutputs API の不在
+
+### 確認済みの事実
+
+- iOS には `availableInputs` に相当する `availableOutputs` API が**存在しない**
+- 出力デバイスの列挙は `currentRoute.outputs` でしか取得できないが、これは**現在アクティブな**出力のみ
+- A2DP 出力専用デバイス（Bluetooth スピーカー等）が非アクティブの場合、どの API からも取得できない
+- Bluetooth HFP/LE デバイスは入出力両対応のため `availableInputs` から検出可能
+
+### 対策（現在の実装）
+
+- `getAvailableOutputs` で `currentRoute.outputs` に加え、`availableInputs` の HFP/LE デバイスも列挙（#65）
+- TS 層で Bluetooth デバイスを入出力両方のピッカーにマージ表示
+- A2DP 専用デバイスがアクティブ出力でない場合は検出できない制限を許容
+
+---
+
 ## 追記ルール
 
 新しい事実が判明した場合、以下の形式で追記すること:

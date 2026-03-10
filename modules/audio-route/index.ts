@@ -25,6 +25,16 @@ export const setPreferredInput = (
 export const setPreferredOutput = (uid: string): Promise<void> =>
   AudioRouteNativeModule?.setPreferredOutput(uid) ?? Promise.resolve()
 
+// 音声認識開始前に audio session を設定し Bluetooth マイクを preferred input にする（#65）
+// expo-speech-recognition の start() 前に呼ぶことで、AVAudioEngine が
+// 正しい Bluetooth 入力デバイスをキャプチャする
+export const prepareSessionForRecognition = (
+  uid: string | null,
+  name?: string | null
+): Promise<void> =>
+  AudioRouteNativeModule?.prepareSessionForRecognition(uid, name ?? null) ??
+  Promise.resolve()
+
 export const getCurrentRoute = (): Promise<{
   inputs: AudioPort[]
   outputs: AudioPort[]
